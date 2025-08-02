@@ -109,7 +109,7 @@ impl BFInterp {
                     if self.array[self.index] != 0 {
                         let mut count = 1;
 
-                        while count > 1 {
+                        while count > 0 {
                             self.instruct_pointer -= 1;
 
                             match self

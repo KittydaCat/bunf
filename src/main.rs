@@ -1,6 +1,6 @@
 mod bf;
 
-use crate::bf::BFInstructions;
+use crate::bf::{BFInstructions, BFInterp};
 
 #[derive(Debug, Clone)]
 pub enum PrimativeType {
@@ -14,6 +14,23 @@ impl PrimativeType {
     fn traverse(&self) -> (&'static str, &'static str) {
         match self {
             PrimativeType::Int(_) | PrimativeType::Boolean(_) | PrimativeType::Uninit => (">", "<"),
+        }
+    }
+
+    // this is a butt done of heap allocs might be slow as fuck
+    fn to_bf(&self) -> Vec<u8> {
+        match self {
+            PrimativeType::Int(x) => vec![*x],
+            PrimativeType::Boolean(x) => vec![*x as u8],
+            PrimativeType::Uninit => vec![0],
+        }
+    }
+
+    fn bf_len(&self) -> usize {
+        match self {
+            PrimativeType::Int(_) => 1,
+            PrimativeType::Boolean(_) => 1,
+            PrimativeType::Uninit => 1,
         }
     }
 }
@@ -141,6 +158,12 @@ struct BFAsmArray {
 }
 
 impl BFAsmArray {
+    fn trim_back(&mut self) {
+        while let Some(PrimativeType::Uninit) = self.array.last() {
+            self.array.pop();
+        }
+    }
+
     fn get_mut(&mut self, pos: usize, len: usize) -> &mut [PrimativeType] {
         while pos + len > self.array.len() {
             self.array.push(PrimativeType::Uninit);
@@ -181,6 +204,65 @@ impl TestComplier {
     fn push_input(&mut self, val: u8) {
         self.array.input.push(val);
         self.interp.input.push(val);
+    }
+
+    fn compare_states(&mut self) -> bool {
+        dbg!("comparing states");
+        dbg!(&self);
+
+        if self.array.input != self.interp.input {
+            dbg!("1");
+            return false;
+        }
+
+        if self.array.output != self.interp.output {
+            dbg!("2");
+            return false;
+        }
+
+        // off by one???
+        let array_pt_pos: usize = self
+            .array
+            .get_mut(0, self.array.index)
+            .iter()
+            .map(|x| x.bf_len())
+            .sum();
+
+        if dbg!(array_pt_pos) != self.interp.index {
+            dbg!("3");
+            return false;
+        }
+
+        self.array.trim_back();
+
+        let mut iter = self.array.array.iter();
+
+        let mut bf_index = 0;
+
+        while let Some(x) = iter.next() {
+            dbg!(x);
+            let y = dbg!(x.to_bf());
+
+            while bf_index + y.len() > self.interp.array.len() {
+                self.interp.array.push(0);
+            }
+
+            if dbg!(self.interp.array.get(bf_index..(bf_index + y.len()))).unwrap() != y {
+                dbg!("4");
+                return false;
+            }
+
+            bf_index += y.len();
+        }
+
+        if let Some(array) = self.interp.array.get(bf_index..) {
+            if array.iter().any(|x| *x != 0) {
+                dbg!("5");
+                return false;
+            }
+        }
+
+        true
     }
 }
 
@@ -231,6 +313,7 @@ impl BFAsmComplier for TestComplier {
         assert_eq!(ret, name);
 
         //TODO add cmp of the arrays
+        assert!(self.compare_states())
     }
 
     fn enabled(&mut self) -> &mut bool {
@@ -477,12 +560,10 @@ fn main() {
     // insert testcase here
     let mut test = TestComplier::default();
 
-    test.push_input('A' as u32 as u8);
-
     test.exec_instructs(&[
-        BFASM::new(0, Var::Input),
-        BFASM::new(0, Var::IntConstAdd(32)),
-        BFASM::new(0, Var::Output),
+        BFASM::new(0, Var::IntSet(2)),
+        BFASM::new(1, Var::IntSet(2)),
+        BFASM::new(0, Var::IntAdd),
     ]);
 
     dbg!(test);
