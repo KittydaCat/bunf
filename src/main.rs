@@ -111,7 +111,7 @@ impl BFAsmInstruction {
             InstructionVariant::BoolNot => todo!(),
             InstructionVariant::BoolCopy => bool_copy(compiler, target),
             InstructionVariant::BoolRemove => bool_remove(compiler, target),
-            InstructionVariant::While(_instructions) => todo!(),
+            InstructionVariant::While(instructions) => bool_while(compiler, target, instructions),
             InstructionVariant::Input => input(compiler, target),
             InstructionVariant::Output => output(compiler, target),
         }
@@ -123,7 +123,7 @@ enum CompilerError {
     TypeMismatch,
 }
 
-trait BFAsmComplier {
+trait BFAsmComplier: Clone {
     // array methods
     fn get_mut(&mut self, pos: usize, len: usize) -> &mut [PrimativeType];
 
@@ -141,9 +141,15 @@ trait BFAsmComplier {
     // writer methods
     fn write(&mut self, code: &str);
 
+    fn write_bf(&mut self, code: &mut Vec<BFInstructions>);
+
     fn label(&mut self, name: &str);
 
-    fn enabled(&mut self) -> &mut bool;
+    fn write_enabled(&mut self) -> &mut bool;
+
+    // fn exec_enabled(&mut self) -> &mut bool;
+
+    // fn clone(&self) -> Self;
 
     // fn exec(&mut self, x: &BFAsmInstruction) -> Result<(), CompilerError>;
 }
@@ -193,6 +199,7 @@ impl BFAsmArray {
 struct TestComplier {
     interp: bf::BFInterp,
     enabled: bool,
+    exec: bool,
     array: BFAsmArray,
 }
 
@@ -271,6 +278,7 @@ impl Default for TestComplier {
         Self {
             interp: Default::default(),
             enabled: true,
+            exec: true,
             array: Default::default(),
         }
     }
@@ -301,24 +309,35 @@ impl BFAsmComplier for TestComplier {
         }
     }
 
+    fn write_bf(&mut self, code: &mut Vec<BFInstructions>) {
+        if self.enabled {
+            self.interp.instructs.append(code);
+        }
+    }
+
     fn label(&mut self, name: &str) {
         if self.enabled {
             self.interp
                 .instructs
                 .push(BFInstructions::Label(String::from(name)));
         }
+        if self.exec {
+            let ret = self.interp.exec_until_label().unwrap();
 
-        let ret = self.interp.exec_until_label().unwrap();
+            assert_eq!(ret, name);
 
-        assert_eq!(ret, name);
-
-        //TODO add cmp of the arrays
-        assert!(self.compare_states())
+            //TODO add cmp of the arrays
+            assert!(self.compare_states())
+        }
     }
 
-    fn enabled(&mut self) -> &mut bool {
+    fn write_enabled(&mut self) -> &mut bool {
         &mut self.enabled
     }
+
+    // fn exec_enabled(&mut self) -> &mut bool {
+    //     &mut self.exec
+    // }
 }
 
 // might split into a traverse over [PrimativeValue] method
@@ -553,6 +572,52 @@ fn output(compiler: &mut impl BFAsmComplier, target: usize) -> Result<(), Compil
     Ok(())
 }
 
+fn bool_while(
+    compiler: &mut impl BFAsmComplier,
+    target: usize,
+    instructs: &[BFAsmInstruction],
+) -> Result<(), CompilerError> {
+    move_ptr_to(compiler, target);
+
+    // first slice check
+    let mut slice = compiler.get_mut_chunk(target);
+
+    let [PrimativeType::Boolean(_)] = &mut slice else {
+        return Err(CompilerError::TypeMismatch);
+    };
+
+    // we could check if write enabled
+    // write the instructs without executing
+    // compiler.write("[");
+
+    // let exec_state = *compiler.exec_enabled();
+
+    // *compiler.exec_enabled() = false;
+    // instructs.iter().for_each(|x| x.exec(compiler).unwrap());
+    // move_ptr_to(compiler, target);
+
+    // assert_eq!(*compiler.index(), target);
+    // *compiler.exec_enabled() = exec_state;
+
+    // compiler.write("]");
+    // compiler.label("bool_while");
+
+    // exec the instructs without writing
+    let write_state = *compiler.write_enabled();
+
+    *compiler.write_enabled() = false;
+
+    while let [PrimativeType::Boolean(true)] = compiler.get_mut_chunk(target) {
+        instructs.iter().for_each(|x| x.exec(compiler).unwrap());
+    }
+
+    *compiler.write_enabled() = write_state;
+
+    Ok(())
+}
+
+fn type_check(compiler: &mut impl BFAsmComplier, target: usize, instructs: &[BFAsmInstruction]) {}
+
 fn main() {
     use BFAsmInstruction as BFASM;
     use InstructionVariant as Var;
@@ -561,9 +626,16 @@ fn main() {
     let mut test = TestComplier::default();
 
     test.exec_instructs(&[
-        BFASM::new(0, Var::IntSet(2)),
-        BFASM::new(1, Var::IntSet(2)),
-        BFASM::new(0, Var::IntAdd),
+        BFASM::new(0, Var::BoolSet(true)),
+        BFASM::new(1, Var::IntSet(3)),
+        BFASM::new(
+            0,
+            Var::While(vec![
+                BFASM::new(0, Var::BoolRemove),
+                BFASM::new(0, Var::BoolSet(false)),
+                BFASM::new(1, Var::IntConstAdd(3)),
+            ]),
+        ),
     ]);
 
     dbg!(test);
@@ -599,6 +671,26 @@ mod test {
             BFASM::new(0, Var::Input),
             BFASM::new(0, Var::IntConstAdd(32)),
             BFASM::new(0, Var::Output),
+        ]);
+
+        dbg!(test);
+    }
+
+    #[test]
+    fn if_test() {
+        let mut test = TestComplier::default();
+
+        test.exec_instructs(&[
+            BFASM::new(0, Var::BoolSet(true)),
+            BFASM::new(1, Var::IntSet(3)),
+            BFASM::new(
+                0,
+                Var::While(vec![
+                    BFASM::new(0, Var::BoolRemove),
+                    BFASM::new(0, Var::BoolSet(false)),
+                    BFASM::new(1, Var::IntConstAdd(3)),
+                ]),
+            ),
         ]);
 
         dbg!(test);
