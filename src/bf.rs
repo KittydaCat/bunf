@@ -1,5 +1,5 @@
 #[derive(Clone, Debug)]
-pub enum BFInstructions {
+pub enum BFInstruction {
     Plus,
     Minus,
     Left,
@@ -11,29 +11,47 @@ pub enum BFInstructions {
     Label(String),
 }
 
-impl BFInstructions {
+impl BFInstruction {
     pub fn from_char(x: char) -> Self {
         match x {
-            '+' => BFInstructions::Plus,
-            '-' => BFInstructions::Minus,
-            '>' => BFInstructions::Left,
-            '<' => BFInstructions::Right,
-            '[' => BFInstructions::Open,
-            ']' => BFInstructions::Close,
-            ',' => BFInstructions::Input,
-            '.' => BFInstructions::Output,
+            '+' => BFInstruction::Plus,
+            '-' => BFInstruction::Minus,
+            '>' => BFInstruction::Left,
+            '<' => BFInstruction::Right,
+            '[' => BFInstruction::Open,
+            ']' => BFInstruction::Close,
+            ',' => BFInstruction::Input,
+            '.' => BFInstruction::Output,
             _ => panic!(),
         }
     }
 
     pub fn from_str(x: &str) -> Vec<Self> {
-        x.chars().map(BFInstructions::from_char).collect()
+        x.chars().map(BFInstruction::from_char).collect()
+    }
+
+    pub fn to_str(vec: &[BFInstruction]) -> String {
+        vec.iter().map(|x| x.to_str_instruct()).collect()
+    }
+
+    pub fn to_str_instruct(&self) -> &str {
+        match self {
+            BFInstruction::Plus => "+",
+            BFInstruction::Minus => "-",
+            BFInstruction::Left => ">",
+            BFInstruction::Right => "<",
+            BFInstruction::Open => "[",
+            BFInstruction::Close => "]",
+            BFInstruction::Input => ",",
+            BFInstruction::Output => ".",
+            BFInstruction::Label(x) => &x,
+        }
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct BFInterp {
-    pub instructs: Vec<BFInstructions>,
+    pub instructs: Vec<BFInstruction>,
     pub instruct_pointer: usize,
 
     pub output: Vec<u8>,
@@ -68,18 +86,18 @@ impl BFInterp {
             dbg!(&self);
 
             match instruct {
-                BFInstructions::Plus => self.array[self.index] += 1,
-                BFInstructions::Minus => self.array[self.index] -= 1,
+                BFInstruction::Plus => self.array[self.index] += 1,
+                BFInstruction::Minus => self.array[self.index] -= 1,
 
-                BFInstructions::Left => {
+                BFInstruction::Left => {
                     self.index += 1;
                     if self.index == self.array.len() {
                         self.array.push(0);
                     }
                 }
-                BFInstructions::Right => self.index -= 1,
+                BFInstruction::Right => self.index -= 1,
 
-                BFInstructions::Open => {
+                BFInstruction::Open => {
                     if self.array[self.index] == 0 {
                         let mut count = 1;
 
@@ -91,21 +109,21 @@ impl BFInterp {
                                 .get(self.instruct_pointer)
                                 .expect("misformed program")
                             {
-                                BFInstructions::Plus
-                                | BFInstructions::Minus
-                                | BFInstructions::Left
-                                | BFInstructions::Right
-                                | BFInstructions::Input
-                                | BFInstructions::Output
-                                | BFInstructions::Label(_) => {}
+                                BFInstruction::Plus
+                                | BFInstruction::Minus
+                                | BFInstruction::Left
+                                | BFInstruction::Right
+                                | BFInstruction::Input
+                                | BFInstruction::Output
+                                | BFInstruction::Label(_) => {}
 
-                                BFInstructions::Open => count += 1,
-                                BFInstructions::Close => count -= 1,
+                                BFInstruction::Open => count += 1,
+                                BFInstruction::Close => count -= 1,
                             }
                         }
                     }
                 }
-                BFInstructions::Close => {
+                BFInstruction::Close => {
                     if self.array[self.index] != 0 {
                         let mut count = 1;
 
@@ -117,24 +135,24 @@ impl BFInterp {
                                 .get(self.instruct_pointer)
                                 .expect("malformed program")
                             {
-                                BFInstructions::Plus
-                                | BFInstructions::Minus
-                                | BFInstructions::Left
-                                | BFInstructions::Right
-                                | BFInstructions::Input
-                                | BFInstructions::Output
-                                | BFInstructions::Label(_) => {}
+                                BFInstruction::Plus
+                                | BFInstruction::Minus
+                                | BFInstruction::Left
+                                | BFInstruction::Right
+                                | BFInstruction::Input
+                                | BFInstruction::Output
+                                | BFInstruction::Label(_) => {}
 
-                                BFInstructions::Open => count -= 1,
-                                BFInstructions::Close => count += 1,
+                                BFInstruction::Open => count -= 1,
+                                BFInstruction::Close => count += 1,
                             }
                         }
                     }
                 }
 
-                BFInstructions::Input => self.array[self.index] = self.input.remove(0),
-                BFInstructions::Output => self.output.push(self.array[self.index]),
-                BFInstructions::Label(x) => {
+                BFInstruction::Input => self.array[self.index] = self.input.remove(0),
+                BFInstruction::Output => self.output.push(self.array[self.index]),
+                BFInstruction::Label(x) => {
                     self.instruct_pointer += 1;
                     return Some(&x);
                 }
@@ -146,7 +164,7 @@ impl BFInterp {
         None
     }
 
-    pub fn exec(&mut self) {
+    pub fn _exec(&mut self) {
         while let Some(_) = self.exec_until_label() {}
     }
 }
