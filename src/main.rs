@@ -3,7 +3,9 @@ mod bf;
 use crate::bf::BFInstruction;
 
 // add subtract assign
-trait CompilerData: std::fmt::Debug + Copy + std::ops::Add<Output = Self> + From<u8> {
+trait CompilerData:
+    std::fmt::Debug + Copy + std::ops::Add<Output = Self> + std::ops::Sub<Output = Self> + From<u8>
+{
     // fn to_u8(&self) -> u8;
 
     // should return true if the cell would trigger a [ loop
@@ -17,6 +19,14 @@ impl std::ops::Add for Empty {
     type Output = Empty;
 
     fn add(self, _: Self) -> Self::Output {
+        Empty
+    }
+}
+
+impl std::ops::Sub for Empty {
+    type Output = Empty;
+
+    fn sub(self, _: Self) -> Self::Output {
         Empty
     }
 }
@@ -53,6 +63,15 @@ impl<T: CompilerData> PrimativeType<T> {
         match self {
             PrimativeType::Int(_) | PrimativeType::Boolean(_) | PrimativeType::Uninit => (">", "<"),
         }
+    }
+
+    fn traverse_array(array: &[Self]) -> (String, String) {
+        dbg!(array);
+        let ltr = array.iter().map(|x| x.traverse().0).collect();
+
+        let rtl = array.iter().rev().map(|x| x.traverse().1).collect();
+
+        dbg!((ltr, rtl))
     }
 
     fn bf_len(&self) -> usize {
@@ -111,6 +130,7 @@ pub enum InstructionVariant {
     // IntDiff(usize),
     IntCopy,
     IntRemove,
+    IntMove(usize),
     // IntSubCons(usize),
     // Cmp(usize), // how do we want this to work?
     // Match(usize, Vec<(u8, Vec<Instructions>)>),
@@ -121,6 +141,7 @@ pub enum InstructionVariant {
     BoolNot,
     BoolCopy,
     BoolRemove,
+    BoolMove(usize),
     // If(usize, Vec<Instructions>),
     While(Vec<Instruction>),
 
@@ -134,10 +155,13 @@ pub enum InstructionVariant {
     // IO
     Input,
     Output,
+
+    // Unsafe Ops
+    UnsafeSub,
 }
 
 impl Instruction {
-    fn lol_exec<C: Compiler<D>, D: CompilerData>(
+    fn raw_exec<C: Compiler<D>, D: CompilerData>(
         &self,
         compiler: &mut C,
     ) -> Result<(), CompilerError> {
@@ -148,13 +172,18 @@ impl Instruction {
             InstructionVariant::IntConstAdd(val) => int_const_add(compiler, target, *val),
             InstructionVariant::IntCopy => int_copy(compiler, target),
             InstructionVariant::IntRemove => int_remove(compiler, target),
+            InstructionVariant::IntMove(index) => int_move(compiler, target, *index),
+
             InstructionVariant::BoolSet(val) => bool_set(compiler, target, *val),
             InstructionVariant::BoolNot => todo!(),
             InstructionVariant::BoolCopy => bool_copy(compiler, target),
             InstructionVariant::BoolRemove => bool_remove(compiler, target),
+            InstructionVariant::BoolMove(_) => todo!(),
+
             InstructionVariant::While(instructions) => bool_while(compiler, target, instructions),
             InstructionVariant::Input => input(compiler, target),
             InstructionVariant::Output => output(compiler, target),
+            InstructionVariant::UnsafeSub => unsafe_sub(compiler, target),
         }
     }
 
@@ -165,13 +194,18 @@ impl Instruction {
             InstructionVariant::IntConstAdd(_) => "int_const_add",
             InstructionVariant::IntCopy => "int_copy",
             InstructionVariant::IntRemove => "int_remove",
+            InstructionVariant::IntMove(_) => "int_move",
+
             InstructionVariant::BoolSet(_) => "bool_set",
             InstructionVariant::BoolNot => todo!(),
             InstructionVariant::BoolCopy => "bool_copy",
             InstructionVariant::BoolRemove => "bool_remove",
+            InstructionVariant::BoolMove(_) => "bool_move",
+
             InstructionVariant::While(_) => "bool_while",
             InstructionVariant::Input => "input",
             InstructionVariant::Output => "output",
+            InstructionVariant::UnsafeSub => "unsafe_sub",
         }
     }
 }
@@ -217,8 +251,11 @@ trait Compiler<Data: CompilerData> {
     fn write_instruct(&mut self, code: BFInstruction);
 
     fn write_bf(&mut self, code: Vec<BFInstruction>) {
+        // dbg!(&code);
+
         if !*self.write_enabled() {
-            panic!()
+            dbg!("the thing");
+            return;
         }
 
         code.into_iter().for_each(|x| self.write_instruct(x))
@@ -240,8 +277,6 @@ trait Compiler<Data: CompilerData> {
 
     fn write_enabled(&mut self) -> &mut bool;
 
-    // fn exec_enabled(&mut self) -> &mut bool;
-
     fn exec(&mut self, x: &Instruction) -> Result<(), CompilerError>;
 
     fn exec_instructs(&mut self, instructs: &[Instruction]) {
@@ -257,7 +292,6 @@ pub struct TestComplier {
     input: Vec<u8>,
     output: Vec<u8>,
     write_enabled: bool,
-    exec_enabled: bool,
 
     interp: bf::BFInterp,
 }
@@ -282,10 +316,9 @@ impl TestComplier {
             return false;
         }
 
-        // off by one???
         let array_pt_pos: usize = self.get_mut(0, self.index).iter().map(|x| x.bf_len()).sum();
 
-        if dbg!(array_pt_pos) != self.interp.index {
+        if array_pt_pos != self.interp.index {
             dbg!("3");
             return false;
         }
@@ -328,7 +361,6 @@ impl Default for TestComplier {
         Self {
             interp: Default::default(),
             write_enabled: true,
-            exec_enabled: true,
             array: Default::default(),
             index: Default::default(),
             input: Default::default(),
@@ -359,22 +391,7 @@ impl Compiler<u8> for TestComplier {
         if !self.write_enabled {
             panic!()
         }
-
-        // if let BFInstruction::Label(_) = &code {
-        //     unreachable!()
-        // }
-
         self.interp.instructs.push(code);
-
-        // if let BFInstruction::Label(x) = self.interp.instructs.last().expect("we just added") {
-        //     let expected_label = String::from(x);
-
-        //     let label = self.interp.exec_until_label().unwrap();
-
-        //     assert_eq!(expected_label, label);
-
-        //     assert!(self.compare_states());
-        // }
     }
 
     fn label(&mut self, name: &str) {
@@ -383,14 +400,6 @@ impl Compiler<u8> for TestComplier {
                 .instructs
                 .push(BFInstruction::Label(String::from(name)));
         }
-
-        // if self.exec_enabled {
-        //     let label = self.interp.exec_until_label().unwrap();
-
-        //     assert_eq!(name, label);
-
-        //     assert!(self.compare_states());
-        // }
     }
 
     fn write_enabled(&mut self) -> &mut bool {
@@ -399,22 +408,16 @@ impl Compiler<u8> for TestComplier {
 
     fn exec(&mut self, x: &Instruction) -> Result<(), CompilerError> {
         dbg!(x);
-        x.lol_exec(self)?;
+        x.raw_exec(self)?;
 
-        if self.exec_enabled {
-            let label = self.interp.exec_until_label().unwrap();
+        let label = self.interp.exec_until_label().unwrap();
 
-            assert_eq!(x.name(), label);
+        assert_eq!(x.name(), label);
 
-            assert!(self.compare_states());
-        }
+        assert!(self.compare_states());
 
         Ok(())
     }
-
-    // fn exec_enabled(&mut self) -> &mut bool {
-    //     &mut self.exec_enabled
-    // }
 }
 
 pub struct BasicCompiler {
@@ -422,7 +425,6 @@ pub struct BasicCompiler {
     index: usize,
     instructs: Vec<BFInstruction>,
     write_enabled: bool,
-    exec_enabled: bool,
 }
 
 impl BasicCompiler {
@@ -443,7 +445,6 @@ impl Default for BasicCompiler {
             index: Default::default(),
             instructs: Default::default(),
             write_enabled: true,
-            exec_enabled: false,
         }
     }
 }
@@ -476,39 +477,46 @@ impl Compiler<Empty> for BasicCompiler {
     }
 
     fn exec(&mut self, x: &Instruction) -> Result<(), CompilerError> {
-        x.lol_exec(self)
+        x.raw_exec(self)
     }
-
-    // fn exec_enabled(&mut self) -> &mut bool {
-    //     if self.exec_enabled {
-    //         panic!()
-    //     }
-
-    //     &mut self.exec_enabled
-    // }
 }
 
 // might split into a traverse over [PrimativeValue] method
 fn move_ptr_to<C: Compiler<D>, D: CompilerData>(compiler: &mut C, target: usize) {
     // this function always assumes the bf pointer is on the last cell of the value
     // this is only important on multi cell values like lists and in the future signed ints
-    while *compiler.index() != target {
-        if *compiler.index() < target {
-            // moving left to right
-            let index = *compiler.index();
-            let x = compiler.get_mut(index, 1)[0].traverse().0;
-            compiler.write(x);
-            *compiler.index() += 1;
-        } else if *compiler.index() > target {
-            //moving right to left
-            let index = *compiler.index();
-            let x = compiler.get_mut(index - 1, 1)[0].traverse().1;
-            compiler.write(x);
-            *compiler.index() -= 1;
-        } else {
-            panic!("???");
-        }
-    }
+
+    // while *compiler.index() != target {
+    //     if *compiler.index() < target {
+    //         // moving left to right
+    //         let index = *compiler.index();
+    //         let x = compiler.get_mut(index, 1)[0].traverse().0;
+    //         compiler.write(x);
+    //         *compiler.index() += 1;
+    //     } else if *compiler.index() > target {
+    //         //moving right to left
+    //         let index = *compiler.index();
+    //         let x = compiler.get_mut(index - 1, 1)[0].traverse().1;
+    //         compiler.write(x);
+    //         *compiler.index() -= 1;
+    //     } else {
+    //         panic!("???");
+    //     }
+    // }
+
+    let index = *compiler.index();
+
+    let code = if index < target {
+        PrimativeType::traverse_array(compiler.get_mut(index, target - index)).0
+    } else if index > target {
+        PrimativeType::traverse_array(compiler.get_mut(target, index - target)).1
+    } else {
+        return;
+    };
+
+    compiler.write(&code);
+
+    *compiler.index() = target;
 }
 
 fn int_add<C: Compiler<D>, D: CompilerData>(
@@ -807,6 +815,7 @@ fn type_check<D: CompilerData>(
     target: usize,
     instructs: &[Instruction],
 ) -> Result<Vec<BFInstruction>, CompilerError> {
+    dbg!("type checking", instructs);
     let mut compiler = BasicCompiler::new(array, target);
 
     compiler.exec_instructs(instructs);
@@ -817,7 +826,84 @@ fn type_check<D: CompilerData>(
     Ok(compiler.instructs)
 }
 
-fn test(instructs: &[Instruction], input: &str) -> String {
+fn unsafe_sub<C: Compiler<D>, D: CompilerData>(
+    compiler: &mut C,
+    target: usize,
+) -> Result<(), CompilerError> {
+    move_ptr_to(compiler, target);
+
+    // first slice check
+    let mut slice = compiler.get_mut_chunk(target);
+
+    let [PrimativeType::Int(x)] = &mut slice else {
+        return Err(CompilerError::TypeMismatch);
+    };
+
+    *x = *x - 1.into();
+
+    compiler.write("-");
+    compiler.label("unsafe_sub");
+
+    Ok(())
+}
+
+fn int_move<C: Compiler<D>, D: CompilerData>(
+    compiler: &mut C,
+    target: usize,
+    index: usize,
+) -> Result<(), CompilerError> {
+    move_ptr_to(compiler, target);
+
+    // first slice check
+    let mut slice = compiler.get_mut_chunk(target);
+
+    let [PrimativeType::Int(x)] = &mut slice else {
+        return Err(CompilerError::TypeMismatch);
+    };
+
+    let val = *x;
+
+    let mut index_slice = compiler.get_mut_chunk(index);
+
+    let [y @ PrimativeType::Uninit] = &mut index_slice else {
+        // dbg!();
+        return Err(CompilerError::TypeMismatch);
+    };
+
+    *y = PrimativeType::Int(val);
+
+    *compiler.get_mut_chunk(target) = [PrimativeType::Uninit];
+
+    compiler.write("[-");
+    // !!! index is the target pos of the move
+    // !!! target is the current index of the ptr
+    //
+    // naming is hard
+    if index < target {
+        //                  \/ we are here
+        // [index] _ _ _ [target]
+        let (ltr, rtl) = PrimativeType::traverse_array(compiler.get_mut(index, target - index));
+        compiler.write(&rtl);
+        compiler.write("+");
+        compiler.write(&ltr);
+    } else if index > target {
+        // [target] _ _ [index]
+        let (ltr, rtl) = PrimativeType::traverse_array(compiler.get_mut(target, index - target));
+        compiler.write(&ltr);
+        compiler.write("+");
+        compiler.write(&rtl);
+    } else {
+        panic!();
+    };
+
+    compiler.write("]");
+
+    compiler.label("int_move");
+
+    Ok(())
+}
+
+pub fn test(instructs: &[Instruction], input: &str) -> String {
     let mut test = TestComplier::default();
 
     input.chars().for_each(|x| test.push_input(x as u32 as u8));
@@ -832,35 +918,11 @@ fn test(instructs: &[Instruction], input: &str) -> String {
 fn main() {
     use Instruction as BFASM;
     use InstructionVariant as Var;
-
     // insert testcase here
 
     dbg!(test(
         &[
-            BFASM::new(0, Var::BoolSet(true)),  // x = true
-            BFASM::new(1, Var::IntSet(3)),      // z = 3
-            BFASM::new(2, Var::BoolSet(false)), // y = false
-            BFASM::new(
-                0,
-                Var::While(vec![
-                    // while x
-                    BFASM::new(1, Var::IntConstAdd(2)), // z += 2
-                    BFASM::new(
-                        2,
-                        Var::While(
-                            // if y
-                            vec![
-                                BFASM::new(2, Var::BoolRemove),
-                                BFASM::new(2, Var::BoolSet(false)),
-                                BFASM::new(0, Var::BoolRemove), // x = false
-                                BFASM::new(0, Var::BoolSet(false)),
-                            ]
-                        )
-                    ),
-                    BFASM::new(2, Var::BoolRemove), // y = true
-                    BFASM::new(2, Var::BoolSet(true)),
-                ]),
-            ),
+        // fill out
         ],
         ""
     ));
@@ -873,7 +935,9 @@ mod test {
     use super::Instruction as BFASM;
     use super::InstructionVariant as Var;
     /*
-    assert_eq!(
+    #[test]
+    fn test_name() {
+        assert_eq!(
             test(
                 &[
                 ],
@@ -881,7 +945,26 @@ mod test {
             ),
             "",
         );
+    }
     */
+
+    #[test]
+    fn int_copy_and_move() {
+        assert_eq!(
+            "+++int_set>>>++int_set<<<[->+>+<<]int_copy>>[-<<+>>]int_move<[->>>+<<<]int_move>>>[-<+>]<int_add",
+            test(
+                &[
+                    BFASM::new(0, Var::IntSet(3)),
+                    BFASM::new(3, Var::IntSet(2)),
+                    BFASM::new(0, Var::IntCopy),
+                    BFASM::new(2, Var::IntMove(0)),
+                    BFASM::new(1, Var::IntMove(4)),
+                    BFASM::new(3, Var::IntAdd),
+                ],
+                ""
+            )
+        )
+    }
 
     #[test]
     fn int_add() {
@@ -933,5 +1016,41 @@ mod test {
             ),
             "+bool_set>+++int_set<[[-]bool_removebool_set>+++int_const_add<]bool_while"
         );
+    }
+
+    #[test]
+    fn nested_while() {
+        assert_eq!(
+            test(
+                &[
+                    BFASM::new(0, Var::BoolSet(true)),  // x = true
+                    BFASM::new(1, Var::IntSet(3)),      // z = 3
+                    BFASM::new(2, Var::BoolSet(false)), // y = false
+                    BFASM::new(
+                        0,
+                        Var::While(vec![
+                            // while x
+                            BFASM::new(1, Var::IntConstAdd(2)), // z += 2
+                            BFASM::new(
+                                2,
+                                Var::While(
+                                    // if y
+                                    vec![
+                                        BFASM::new(2, Var::BoolRemove),
+                                        BFASM::new(2, Var::BoolSet(false)),
+                                        BFASM::new(0, Var::BoolRemove), // x = false
+                                        BFASM::new(0, Var::BoolSet(false)),
+                                    ]
+                                )
+                            ),
+                            BFASM::new(2, Var::BoolRemove), // y = true
+                            BFASM::new(2, Var::BoolSet(true)),
+                        ]),
+                    ),
+                ],
+                ""
+            ),
+            "+bool_set>+++int_set>bool_set<<[>++int_const_add>[[-]bool_removebool_set<<[-]bool_removebool_set>>]bool_while[-]bool_remove+bool_set<<]bool_while"
+        )
     }
 }

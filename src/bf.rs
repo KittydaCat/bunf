@@ -83,7 +83,7 @@ impl BFInterp {
         // dbg!(&self);
 
         while let Some(instruct) = self.instructs.get(self.instruct_pointer) {
-            dbg!(&self);
+            // dbg!(&self);
 
             match instruct {
                 BFInstruction::Plus => self.array[self.index] += 1,
