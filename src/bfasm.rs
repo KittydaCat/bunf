@@ -4,7 +4,7 @@ use crate::bf;
 
 // add subtract assign
 trait CompilerData:
-    std::fmt::Debug + Copy + std::ops::Add<Output = Self> + std::ops::Sub<Output = Self> + From<u8>
+    std::fmt::Debug + Copy + std::ops::Add<Output = Self> + std::ops::Sub<Output = Self> + From<u8> + Eq
 {
     // fn to_u8(&self) -> u8;
 
@@ -12,7 +12,7 @@ trait CompilerData:
     fn to_bool(&self) -> bool;
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 struct Empty;
 
 impl std::ops::Add for Empty {
@@ -50,7 +50,7 @@ impl CompilerData for u8 {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum PrimativeType<T: CompilerData> {
     Int(T),
     Bool(T),
@@ -119,6 +119,13 @@ impl Instruction {
 }
 
 #[derive(Clone, Debug)]
+pub struct Function {
+    argument_types: Vec<(PrimativeType<Empty>, usize)>,
+    return_types: Vec<(usize, PrimativeType<Empty>)>,
+    instructions: Vec<Instruction>,
+}
+
+#[derive(Clone, Debug)]
 pub enum InstructionVariant {
     // bf ptr ops
     // MovePtrTo(usize),
@@ -144,11 +151,7 @@ pub enum InstructionVariant {
     BoolMove(usize),
     // If(usize, Vec<Instructions>),
     While(Vec<Instruction>),
-    // Function {
-    //     argument_types: Vec<(PrimativeType<Empty>, usize)>,
-    //     return_types: Vec<(PrimativeType<Empty>, usize)>,
-    //     instructions: Vec<Instruction>,
-    // },
+    Function(Function),
 
     // List ops
     // ListInit(usize),
@@ -186,11 +189,11 @@ impl Instruction {
             InstructionVariant::BoolMove(index) => bool_move(compiler, target, *index),
 
             InstructionVariant::While(instructions) => bool_while(compiler, target, instructions),
-            // InstructionVariant::Function {
-            //     argument_types,
-            //     return_types,
-            //     instructions,
-            // } => bfasm_function(compiler, argument_types, return_types, instructions),
+            InstructionVariant::Function(Function {
+                argument_types,
+                return_types,
+                instructions,
+            }) => bfasm_function(compiler, argument_types, return_types, instructions, target),
             InstructionVariant::Input => input(compiler, target),
             InstructionVariant::Output => output(compiler, target),
             InstructionVariant::UnsafeSub => unsafe_sub(compiler, target),
@@ -213,7 +216,7 @@ impl Instruction {
             InstructionVariant::BoolMove(_) => "bool_move",
 
             InstructionVariant::While(_) => "bool_while",
-            // InstructionVariant::Function { .. } => "function",
+            InstructionVariant::Function(_) => "function",
             InstructionVariant::Input => "input",
             InstructionVariant::Output => "output",
             InstructionVariant::UnsafeSub => "unsafe_sub",
@@ -433,6 +436,7 @@ impl Compiler<u8> for TestComplier {
         dbg!(x);
         x.raw_exec(self)?;
 
+        dbg!(x);
         let label = self.interp.exec_until_label().unwrap();
 
         assert_eq!(x.name(), label);
@@ -936,14 +940,16 @@ fn bool_not<C: Compiler<D>, D: CompilerData>(
     Ok(())
 }
 
-/*
 fn bfasm_function<C: Compiler<D>, D: CompilerData>(
     compiler: &mut C,
     argument_types: &[(PrimativeType<Empty>, usize)],
-    return_types: &[(PrimativeType<Empty>, usize)],
+    return_types: &[(usize, PrimativeType<Empty>)],
     instructs: &[Instruction],
     target: usize,
 ) -> Result<(), CompilerError> {
+    move_ptr_to(compiler, target);
+
+    // check the argument types
     compiler.trim_back();
 
     let mut first = true;
@@ -965,20 +971,78 @@ fn bfasm_function<C: Compiler<D>, D: CompilerData>(
             first = false;
         }
 
-        assert_eq!(compiler.get_unchecked(index).unwrap().to_empty(), arg_type);
+        assert_eq!(&compiler.get_unchecked(index).unwrap().to_empty(), arg_type);
 
         index -= 1;
     }
 
     assert_eq!(index + 1, target);
 
+    // run the instructs on the test compiler
     let len = compiler.get_array_mut().len() - target;
 
-    // let mut test_compiler = TestComplier::new(compiler.get_mut(target, len), 0);
+    let mut test_compiler = BasicCompiler::new(compiler.get_mut(target, len), 0);
 
-    todo!()
+    test_compiler.exec_instructs(instructs);
+
+    move_ptr_to(&mut test_compiler, 0);
+
+    test_compiler.trim_back();
+
+    // check that the return types are correct
+    let mut index = 0;
+
+    for (arg_len, arg_type) in return_types.iter() {
+        for _ in 0..*arg_len {
+            assert_eq!(
+                test_compiler.get_unchecked(index).unwrap().to_empty(),
+                PrimativeType::Uninit
+            );
+
+            index += 1;
+        }
+
+        assert_eq!(
+            &test_compiler.get_unchecked(index).unwrap().to_empty(),
+            arg_type
+        );
+
+        index += 1;
+    }
+
+    assert_eq!(index, test_compiler.get_array_mut().len());
+
+    /*
+    // write the bf and exec the function without the instructions
+    compiler.write_bf(test_compiler.instructs);
+
+    compiler.label("function");
+
+    let real_instructs: Vec<_> = instructs
+        .iter()
+        .map(|x| Instruction::new(x.target + target, x.variant.clone()))
+        .collect();
+
+    let write = *compiler.write_enabled();
+    *compiler.write_enabled() = false;
+
+    compiler.exec_instructs(&real_instructs);
+    move_ptr_to(compiler, target);
+
+    *compiler.write_enabled() = write;
+    */
+
+    let real_instructs: Vec<_> = instructs
+        .iter()
+        .map(|x| Instruction::new(x.target + target, x.variant.clone()))
+        .collect();
+
+    compiler.exec_instructs(&real_instructs);
+
+    compiler.label("function");
+
+    Ok(())
 }
-*/
 
 // TODO not actually limited to bools
 fn bool_while<D: CompilerData, C: Compiler<D>>(
@@ -1090,7 +1154,7 @@ pub fn test(instructs: &[Instruction], input: &str) -> String {
     bf::BFInstruction::to_str(&test.interp.instructs)
 }
 
-fn main() {
+pub fn main() {
     use Instruction as BFASM;
     use InstructionVariant as Var;
     // insert testcase here
@@ -1098,7 +1162,19 @@ fn main() {
     dbg!(test(
         &[
             // fill out
-
+            Instruction::new(1, InstructionVariant::IntSet(1)),
+            Instruction::new(2, InstructionVariant::IntSet(2)),
+            Instruction::new(
+                1,
+                InstructionVariant::Function(Function {
+                    argument_types: vec![
+                        (PrimativeType::Int(Empty), 0),
+                        (PrimativeType::Int(Empty), 0)
+                    ],
+                    return_types: vec![(0, PrimativeType::Int(Empty))],
+                    instructions: vec![Instruction::new(0, InstructionVariant::IntAdd)]
+                })
+            )
         ],
         ""
     ));
@@ -1123,7 +1199,30 @@ mod test {
         );
     }
     */
-
+    #[test]
+    fn function_test() {
+        assert_eq!(
+            test(
+                &[
+                    Instruction::new(1, InstructionVariant::IntSet(1)),
+                    Instruction::new(2, InstructionVariant::IntSet(2)),
+                    Instruction::new(
+                        1,
+                        InstructionVariant::Function(Function {
+                            argument_types: vec![
+                                (PrimativeType::Int(Empty), 0),
+                                (PrimativeType::Int(Empty), 0)
+                            ],
+                            return_types: vec![(0, PrimativeType::Int(Empty))],
+                            instructions: vec![Instruction::new(0, InstructionVariant::IntAdd)]
+                        })
+                    )
+                ],
+                ""
+            ),
+            ">+int_set>++int_set<>[-<+>]<int_addfunction",
+        );
+    }
     #[test]
     fn bool_not() {
         assert_eq!(

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 mod bf;
 mod bfasm;
 
@@ -113,6 +115,7 @@ struct AST {
 #[derive(Debug, Clone)]
 struct FunctionDec {
     name: String,
+    // requirements: Vec<String>,
     statements: Vec<Statement>,
 }
 
@@ -273,12 +276,22 @@ fn parse_value(token: &mut std::vec::IntoIter<Token>) -> Value {
 fn ast_to_bfasm(ast: AST) -> Vec<bfasm::Instruction> {
     assert_eq!(&ast.imports, &[String::from("libf")]);
 
+    let mut functions: HashMap<&str, bfasm::Function> = HashMap::new();
+
+    let main_fn = ast.functions.iter().find(|x| x.name == "main").unwrap();
+
     todo!()
 }
 
-fn ast_fn_to_bfasm(ast: FunctionDec) {}
+fn ast_fn_to_bfasm(function: FunctionDec) -> bfasm::Function {
+    todo!()
+}
 
 fn main() {
+    bfasm::main();
+
+    todo!();
+
     let program = std::fs::read_to_string("./program/src/main.rs").unwrap();
 
     let tokens = tokenize(&program);
