@@ -1,5 +1,9 @@
 use std::collections::HashMap;
 
+use crate::bfasm::DebugComplier;
+
+type EmptyType = bfasm::PrimativeType<bfasm::Empty>;
+
 mod bf;
 mod bfasm;
 
@@ -24,7 +28,7 @@ enum Token {
 
 #[derive(Debug, Clone)]
 enum Literal {
-    Int(usize),
+    Int(u8),
 }
 
 fn tokenize_str(name: &str) -> Option<Token> {
@@ -123,6 +127,7 @@ struct FunctionDec {
 enum Statement {
     Declaration {
         mutable: bool,
+        copied: bool,
         variable: String,
         value: Value,
     },
@@ -234,7 +239,10 @@ fn parse_statements(tokens: &mut std::vec::IntoIter<Token>) -> Vec<Statement> {
 
                 let value = parse_value(tokens);
 
+                // TODO make copied work
+
                 statements.push(Statement::Declaration {
+                    copied: true,
                     mutable,
                     variable,
                     value,
@@ -273,6 +281,7 @@ fn parse_value(token: &mut std::vec::IntoIter<Token>) -> Value {
     value
 }
 
+// TODO this does not handle recursion or indirect recursion
 fn ast_to_bfasm(ast: AST) -> Vec<bfasm::Instruction> {
     assert_eq!(&ast.imports, &[String::from("libf")]);
 
@@ -280,17 +289,112 @@ fn ast_to_bfasm(ast: AST) -> Vec<bfasm::Instruction> {
 
     let main_fn = ast.functions.iter().find(|x| x.name == "main").unwrap();
 
-    todo!()
+    // TODO compiler mains dependences before compiling it and so on
+    // or this dependency initalization could be done by ast_fn_to_bfasm
+
+    ast_fn_to_bfasm(main_fn.clone(), &mut functions).instructions
 }
 
-fn ast_fn_to_bfasm(function: FunctionDec) -> bfasm::Function {
-    todo!()
+fn ast_fn_to_bfasm(
+    function: FunctionDec,
+    functions: &mut HashMap<&str, bfasm::Function>,
+) -> bfasm::Function {
+    // let mut reverse_stack: Vec<Value> = Vec::new();
+    // let mut reverse_stack: Vec<bfasm::PrimativeType<bfasm::Empty>> = Vec::new();
+
+    let mut instructions = Vec::new();
+
+    let mut vars: Vec<(String, EmptyType, usize)> = Vec::new();
+
+    let mut offset = 0;
+
+    let FunctionDec { name, statements } = function;
+
+    for statement in statements {
+        match statement {
+            Statement::Declaration {
+                copied,
+                mutable,
+                variable,
+                value,
+            } => {
+                instructions.append(&mut ast_value_to_bfasm(&value, &vars, offset));
+
+                vars.push((variable, EmptyType::Int(bfasm::Empty), offset));
+
+                offset += 1;
+
+                if copied {
+                    offset += 2;
+                }
+            }
+            Statement::Assignment { variable, value } => todo!(),
+        }
+    }
+
+    bfasm::Function {
+        argument_types: Vec::new(),
+        return_types: Vec::new(),
+        instructions,
+    }
+}
+
+fn ast_value_to_bfasm(
+    value: &Value,
+    vars: &[(String, EmptyType, usize)],
+    // reverse_stack: &mut Vec<bfasm::PrimativeType<bfasm::Empty>>,
+    offset: usize,
+) -> Vec<bfasm::Instruction> {
+    match value {
+        Value::Constant(Literal::Int(x)) => {
+            vec![bfasm::Instruction::new(
+                offset,
+                bfasm::InstructionVariant::IntSet(*x),
+            )]
+        }
+        Value::Variable { name } => {
+            let x = vars.iter().find(|x| &x.0 == name).unwrap();
+
+            let index = x.2;
+
+            match x.1 {
+                bfasm::PrimativeType::Int(_) => {
+                    vec![
+                        bfasm::Instruction::new(index, bfasm::InstructionVariant::IntCopy),
+                        bfasm::Instruction::new(
+                            index + 1,
+                            bfasm::InstructionVariant::IntMove(index),
+                        ),
+                        bfasm::Instruction::new(
+                            index + 2,
+                            bfasm::InstructionVariant::IntMove(offset),
+                        ),
+                    ]
+                }
+                bfasm::PrimativeType::Bool(_) => {
+                    vec![
+                        bfasm::Instruction::new(index, bfasm::InstructionVariant::BoolCopy),
+                        bfasm::Instruction::new(
+                            index + 1,
+                            bfasm::InstructionVariant::BoolMove(index),
+                        ),
+                        bfasm::Instruction::new(
+                            index + 2,
+                            bfasm::InstructionVariant::BoolMove(offset),
+                        ),
+                    ]
+                }
+                bfasm::PrimativeType::Uninit => unreachable!(),
+            }
+        }
+        Value::Function { name } => todo!(),
+    }
 }
 
 fn main() {
-    bfasm::main();
+    // bfasm::main();
 
-    todo!();
+    // todo!();
 
     let program = std::fs::read_to_string("./program/src/main.rs").unwrap();
 
@@ -301,6 +405,14 @@ fn main() {
     let ast = tokens_to_ast(tokens);
 
     dbg!(&ast);
+
+    let instructs = ast_to_bfasm(ast);
+
+    dbg!(&instructs);
+
+    let mut compiler = DebugComplier::default();
+
+    compiler.exec_instructs(&instructs);
 }
 
 #[cfg(test)]

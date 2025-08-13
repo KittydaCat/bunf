@@ -13,7 +13,7 @@ trait CompilerData:
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-struct Empty;
+pub struct Empty;
 
 impl std::ops::Add for Empty {
     type Output = Empty;
@@ -51,7 +51,7 @@ impl CompilerData for u8 {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum PrimativeType<T: CompilerData> {
+pub enum PrimativeType<T: CompilerData> {
     Int(T),
     Bool(T),
     // List(Vec<PrimativeType>),
@@ -120,9 +120,9 @@ impl Instruction {
 
 #[derive(Clone, Debug)]
 pub struct Function {
-    argument_types: Vec<(PrimativeType<Empty>, usize)>,
-    return_types: Vec<(usize, PrimativeType<Empty>)>,
-    instructions: Vec<Instruction>,
+    pub argument_types: Vec<(PrimativeType<Empty>, usize)>,
+    pub return_types: Vec<(usize, PrimativeType<Empty>)>,
+    pub instructions: Vec<Instruction>,
 }
 
 #[derive(Clone, Debug)]
@@ -303,7 +303,7 @@ trait Compiler<Data: CompilerData> {
 }
 
 #[derive(Clone, Debug)]
-pub struct TestComplier {
+pub struct DebugComplier {
     array: Vec<PrimativeType<u8>>,
     index: usize,
     input: Vec<u8>,
@@ -313,7 +313,7 @@ pub struct TestComplier {
     interp: bf::BFInterp,
 }
 
-impl TestComplier {
+impl DebugComplier {
     // fn new<D: CompilerData>(types: &[PrimativeType<D>], index: usize) -> Self {
     //     let array = types.iter().map(|x| x.to_empty()).collect();
     //     BasicCompiler {
@@ -322,6 +322,10 @@ impl TestComplier {
     //         ..Default::default()
     //     }
     // }
+
+    pub fn exec_instructs(&mut self, instructs: &[Instruction]) {
+        Compiler::exec_instructs(self, instructs)
+    }
 
     pub fn push_input(&mut self, val: u8) {
         self.input.push(val);
@@ -382,7 +386,7 @@ impl TestComplier {
     }
 }
 
-impl Default for TestComplier {
+impl Default for DebugComplier {
     fn default() -> Self {
         Self {
             interp: Default::default(),
@@ -395,7 +399,7 @@ impl Default for TestComplier {
     }
 }
 
-impl Compiler<u8> for TestComplier {
+impl Compiler<u8> for DebugComplier {
     fn get_array_mut(&mut self) -> &mut Vec<PrimativeType<u8>> {
         &mut self.array
     }
@@ -1143,7 +1147,7 @@ fn unsafe_sub<C: Compiler<D>, D: CompilerData>(
 */
 
 pub fn test(instructs: &[Instruction], input: &str) -> String {
-    let mut test = TestComplier::default();
+    let mut test = DebugComplier::default();
 
     input.chars().for_each(|x| test.push_input(x as u32 as u8));
 
