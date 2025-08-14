@@ -1,5 +1,3 @@
-use std::usize;
-
 use crate::bf;
 
 // add subtract assign
@@ -140,8 +138,7 @@ pub enum InstructionVariant {
     IntMove(usize),
     // IntSubCons(usize),
     // Cmp(usize), // how do we want this to work?
-    // Match(usize, Vec<(u8, Vec<Instructions>)>),
-    // Eq(usize),
+    IntEq,
 
     // Boolean Ops
     BoolSet(bool),
@@ -151,6 +148,7 @@ pub enum InstructionVariant {
     BoolMove(usize),
     // If(usize, Vec<Instructions>),
     While(Vec<Instruction>),
+    // Match(usize, Vec<(u8, Vec<Instructions>)>),
     Function(Function),
 
     // List ops
@@ -181,6 +179,7 @@ impl Instruction {
             InstructionVariant::IntCopy => int_copy(compiler, target),
             InstructionVariant::IntRemove => int_remove(compiler, target),
             InstructionVariant::IntMove(index) => int_move(compiler, target, *index),
+            InstructionVariant::IntEq => int_eq(compiler, target),
 
             InstructionVariant::BoolSet(val) => bool_set(compiler, target, *val),
             InstructionVariant::BoolNot => bool_not(compiler, target),
@@ -208,6 +207,7 @@ impl Instruction {
             InstructionVariant::IntCopy => "int_copy",
             InstructionVariant::IntRemove => "int_remove",
             InstructionVariant::IntMove(_) => "int_move",
+            InstructionVariant::IntEq => "int_eq",
 
             InstructionVariant::BoolSet(_) => "bool_set",
             InstructionVariant::BoolNot => "bool_not",
@@ -762,6 +762,36 @@ fn input<D: CompilerData, C: Compiler<D>>(
     Ok(())
 }
 
+fn int_eq<D: CompilerData, C: Compiler<D>>(
+    compiler: &mut C,
+    target: usize,
+) -> Result<(), CompilerError> {
+    move_ptr_to(compiler, target);
+
+    let mut slice = compiler.get_mut_chunk(target);
+
+    let [
+        PrimativeType::Int(x),
+        PrimativeType::Uninit,
+        PrimativeType::Int(y),
+        PrimativeType::Uninit,
+        PrimativeType::Uninit,
+    ] = &mut slice
+    else {
+        return Err(CompilerError::TypeMismatch);
+    };
+
+    let var = if *x == *y { 1 } else { 0 };
+
+    slice[0] = PrimativeType::Bool(var.into());
+
+    slice[2] = PrimativeType::Uninit;
+
+    compiler.write(">>>>+<<[-<<[->]>]>>[<<<+<[>-<[-]]>>>]>-<<[-]<[-<+>]<");
+    compiler.label("int_eq");
+
+    Ok(())
+}
 fn output<D: CompilerData, C: Compiler<D>>(
     compiler: &mut C,
     target: usize,
@@ -1162,26 +1192,23 @@ pub fn main() {
     use Instruction as BFASM;
     use InstructionVariant as Var;
     // insert testcase here
+    for x in 0..5 {
+        for y in 0..5 {
+            let instruc = vec![
+                Instruction::new(0, InstructionVariant::IntSet(x)),
+                Instruction::new(2, InstructionVariant::IntSet(y)),
+                Instruction::new(0, InstructionVariant::IntEq),
+            ];
 
-    dbg!(test(
-        &[
-            // fill out
-            Instruction::new(1, InstructionVariant::IntSet(1)),
-            Instruction::new(2, InstructionVariant::IntSet(2)),
-            Instruction::new(
-                1,
-                InstructionVariant::Function(Function {
-                    argument_types: vec![
-                        (PrimativeType::Int(Empty), 0),
-                        (PrimativeType::Int(Empty), 0)
-                    ],
-                    return_types: vec![(0, PrimativeType::Int(Empty))],
-                    instructions: vec![Instruction::new(0, InstructionVariant::IntAdd)]
-                })
-            )
-        ],
-        ""
-    ));
+            dbg!(test(&instruc, ""));
+        }
+    }
+    // dbg!(test(
+    //     &[
+    //         // fill out
+    //                 ],
+    //     ""
+    // ));
 }
 
 #[cfg(test)]
@@ -1203,6 +1230,21 @@ mod test {
         );
     }
     */
+
+    fn eq_test() {
+        for x in 0..5 {
+            for y in 0..5 {
+                let instruc = vec![
+                    Instruction::new(0, InstructionVariant::IntSet(x)),
+                    Instruction::new(2, InstructionVariant::IntSet(y)),
+                    Instruction::new(0, InstructionVariant::IntEq),
+                ];
+
+                test(&instruc, "");
+            }
+        }
+    }
+
     #[test]
     fn function_test() {
         assert_eq!(
