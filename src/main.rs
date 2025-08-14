@@ -36,6 +36,7 @@ enum Token {
 #[derive(Debug, Clone)]
 enum Literal {
     Int(u8),
+    Bool(bool),
 }
 
 fn tokenize_str(name: &str) -> Option<Token> {
@@ -49,6 +50,8 @@ fn tokenize_str(name: &str) -> Option<Token> {
         "fn" => Some(Token::Fn),
         "mod" => Some(Token::Mod),
         "while" => Some(Token::While),
+        "true" => Some(Token::Literal(Literal::Bool(true))),
+        "false" => Some(Token::Literal(Literal::Bool(false))),
 
         _ => None,
     }
@@ -190,6 +193,7 @@ enum ValueSource {
 #[derive(Debug, Clone)]
 enum Operation {
     IntAdd(Box<Value>, Box<Value>),
+    IntSub(Box<Value>, u8),
     IntEq(Box<Value>, Box<Value>),
     BoolNot(Box<Value>),
 }
@@ -353,6 +357,10 @@ fn parse_value(
                 val_type: EmptyType::Int(Empty),
                 val_source: ValueSource::Constant(lit),
             },
+            Literal::Bool(_) => Value {
+                val_type: EmptyType::Bool(Empty),
+                val_source: ValueSource::Constant(lit),
+            },
         },
 
         Token::Not => {
@@ -435,7 +443,26 @@ fn parse_value(
         //         val_source: todo!(),
         //     };
         // }
-        Token::Minus => todo!(),
+        Token::Minus => {
+            let (
+                Value {
+                    val_type: EmptyType::Int(Empty),
+                    val_source: ValueSource::Constant(Literal::Int(x)),
+                },
+                token,
+            ) = parse_value(tokens, vars)
+            else {
+                panic!()
+            };
+
+            (
+                Value {
+                    val_type: EmptyType::Int(Empty),
+                    val_source: ValueSource::Operation(Operation::IntSub(Box::new(value), x)),
+                },
+                token,
+            )
+        }
 
         x @ (Token::OpenBrace | Token::SemiColon | Token::CloseParens) => return (value, x),
 
@@ -450,7 +477,7 @@ fn parse_value(
 fn ast_to_bfasm(ast: AST) -> Vec<bfasm::Instruction> {
     assert_eq!(&ast.imports, &[String::from("libf")]);
 
-    let mut functions: HashMap<&str, bfasm::Function> = HashMap::new();
+    // let mut functions: HashMap<&str, bfasm::Function> = HashMap::new();
 
     let main_fn = ast.functions.iter().find(|x| x.name == "main").unwrap();
 
@@ -460,7 +487,7 @@ fn ast_to_bfasm(ast: AST) -> Vec<bfasm::Instruction> {
     ast_statements_to_bfasm(
         main_fn.statements.clone(),
         &mut HashMap::new(),
-        &mut functions,
+        // &mut functions,
         0,
     )
 }
@@ -468,7 +495,7 @@ fn ast_to_bfasm(ast: AST) -> Vec<bfasm::Instruction> {
 fn ast_statements_to_bfasm(
     statements: Vec<Statement>,
     vars: &mut HashMap<String, (EmptyType, usize)>,
-    functions: &mut HashMap<&str, bfasm::Function>,
+    // functions: &mut HashMap<&str, bfasm::Function>,
     mut offset: usize,
 ) -> Vec<bfasm::Instruction> {
     // let mut reverse_stack: Vec<Value> = Vec::new();
@@ -540,9 +567,7 @@ fn ast_statements_to_bfasm(
                     bfasm::InstructionVariant::BoolRemove,
                 ));
 
-                while_instructs.append(&mut ast_statements_to_bfasm(
-                    statements, vars, functions, offset,
-                ));
+                while_instructs.append(&mut ast_statements_to_bfasm(statements, vars, offset));
 
                 while_instructs.append(&mut value_instructs);
 
@@ -570,6 +595,14 @@ fn ast_value_to_bfasm(
                 bfasm::InstructionVariant::IntSet(*x),
             )]
         }
+
+        ValueSource::Constant(Literal::Bool(x)) => {
+            vec![bfasm::Instruction::new(
+                offset,
+                bfasm::InstructionVariant::BoolSet(*x),
+            )]
+        }
+
         ValueSource::Variable { name } => {
             let x = vars.get(name).unwrap();
 
@@ -617,6 +650,16 @@ fn ast_value_to_bfasm(
                         offset,
                         bfasm::InstructionVariant::IntAdd,
                     ));
+                }
+
+                Operation::IntSub(value, num) => {
+                    instructs.append(&mut ast_value_to_bfasm(&value, vars, offset));
+                    (0..*num).for_each(|_| {
+                        instructs.push(bfasm::Instruction::new(
+                            offset,
+                            bfasm::InstructionVariant::UnsafeSub,
+                        ))
+                    });
                 }
 
                 Operation::IntEq(value1, value2) => {

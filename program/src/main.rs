@@ -1,28 +1,32 @@
 mod libf;
 
 fn main() {
-    // let mut x = 1;
+    let mut x = 5;
 
-    // let mut y = x;
+    let mut y = 3;
 
-    // y = y + 1;
+    let mut b = true;
 
-    // x = y;
-
-    // let mut x = 0;
-
-    // let y = x == 1;
-
-    // x = x + 2;
-
-    // let z = x == 2;
-
-    let mut x = 0;
-
-    let mut y = (x == 6);
-
-    while !y {
-        x = x + 1;
-        y = x == 6;
+    if x == 0 {
+        b = false;
     }
+
+    if y == 0 {
+        b = false;
+    }
+
+    while b {
+        x = x - 1;
+        y = y - 1;
+
+        if x == 0 {
+            b = false;
+        }
+
+        if y == 0 {
+            b = false;
+        }
+    }
+
+    let z = x + y;
 }

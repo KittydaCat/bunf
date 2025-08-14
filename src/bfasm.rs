@@ -48,6 +48,28 @@ impl CompilerData for u8 {
     }
 }
 
+trait DataVec<D: CompilerData> {
+    fn push(&mut self, data: D);
+    fn pop(&mut self) -> D;
+    fn get_mut(&mut self, index: D) -> &mut D;
+}
+
+struct EmptyVec {
+    empty: Empty,
+}
+
+impl DataVec<Empty> for EmptyVec {
+    fn push(&mut self, data: Empty) {}
+
+    fn pop(&mut self) -> Empty {
+        Empty
+    }
+
+    fn get_mut(&mut self, index: Empty) -> &mut Empty {
+        &mut self.empty
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrimativeType<T: CompilerData> {
     Int(T),
