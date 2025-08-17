@@ -1,32 +1,15 @@
 mod libf;
 
+use libf::*;
+
 fn main() {
-    let mut x = 5;
+    let mut vec = list();
 
-    let mut y = 3;
+    let mut x = 0;
 
-    let mut b = true;
+    while !(x == 6) {
+        vec.push(x);
 
-    if x == 0 {
-        b = false;
+        x += 1;
     }
-
-    if y == 0 {
-        b = false;
-    }
-
-    while b {
-        x = x - 1;
-        y = y - 1;
-
-        if x == 0 {
-            b = false;
-        }
-
-        if y == 0 {
-            b = false;
-        }
-    }
-
-    let z = x + y;
 }

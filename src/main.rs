@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::bfasm::{DebugComplier, Empty};
 
-type EmptyType = bfasm::PrimativeType<bfasm::Empty>;
+type EmptyType = bfasm::PrimativeType<bfasm::Empty, bfasm::EmptyVec>;
 
 mod bf;
 mod bfasm;
@@ -16,10 +16,14 @@ enum Token {
 
     SemiColon,
     Equals,
+    Path,
+    Star,
+    Comma,
 
     Plus,
     Minus,
     Not,
+    Dot,
 
     LineComment(String),
 
@@ -28,6 +32,8 @@ enum Token {
     Mut,
     Fn,
     While,
+    If,
+    Use,
 
     Name(String),
     Literal(Literal),
@@ -52,6 +58,8 @@ fn tokenize_str(name: &str) -> Option<Token> {
         "while" => Some(Token::While),
         "true" => Some(Token::Literal(Literal::Bool(true))),
         "false" => Some(Token::Literal(Literal::Bool(false))),
+        "if" => Some(Token::If),
+        "use" => Some(Token::Use),
 
         _ => None,
     }
@@ -121,9 +129,19 @@ fn tokenize(program_txt: &str) -> Vec<Token> {
                 tokens.push(Token::LineComment(comment));
             }
 
+            ':' => {
+                assert_eq!(':', program.next().unwrap());
+
+                tokens.push(Token::Path);
+            }
+
+            '*' => tokens.push(Token::Star),
+            ',' => tokens.push(Token::Comma),
+
             '+' => tokens.push(Token::Plus),
             '-' => tokens.push(Token::Minus),
             '!' => tokens.push(Token::Not),
+            '.' => tokens.push(Token::Dot),
 
             _ => {
                 dbg!(car);
@@ -146,14 +164,20 @@ fn tokenize(program_txt: &str) -> Vec<Token> {
 #[derive(Debug, Clone)]
 struct AST {
     imports: Vec<String>,
-    functions: Vec<FunctionDec>,
+    functions: Vec<Function>,
 }
 
 #[derive(Debug, Clone)]
-struct FunctionDec {
+struct Function {
     name: String,
-    // requirements: Vec<String>,
+    sig: FunctionSig,
     statements: Vec<Statement>,
+}
+
+#[derive(Debug, Clone)]
+struct FunctionSig {
+    args: Vec<EmptyType>,
+    ret: EmptyType,
 }
 
 #[derive(Debug, Clone)]
@@ -172,9 +196,17 @@ enum Statement {
     While {
         statements: Vec<Statement>,
         value: Value,
-    }, // Unit {
-       //     value: Value,
-       // },
+    },
+
+    If {
+        statements: Vec<Statement>,
+        value: Value,
+    },
+
+    // value should be uninit
+    Unit {
+        value: Value,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -198,25 +230,37 @@ enum Operation {
     BoolNot(Box<Value>),
 }
 
+// TODO we need to generate at least the function definition before parseing main if it contains
+// another user defined function for type labling
 fn tokens_to_ast(raw_tokens: Vec<Token>) -> AST {
     let mut tokens = raw_tokens.into_iter();
 
-    let mut functions = Vec::new();
+    let mut functions = HashMap::new();
 
     let mut imports = Vec::new();
 
     while let Some(token) = tokens.next() {
         match token {
             Token::Fn => {
-                let name = parse_fn_args(&mut tokens);
+                let Some(Token::Name(name)) = tokens.next() else {
+                    panic!()
+                };
+
+                let sig = parse_fn_def(&mut tokens);
 
                 let mut vars = HashMap::new();
 
-                let statements = parse_statements(&mut tokens, &mut vars);
+                let statements = parse_statements(&mut tokens, &mut vars, &mut functions);
 
-                let func = FunctionDec { name, statements };
+                let name2 = name.clone();
 
-                functions.push(func);
+                let func = Function {
+                    name,
+                    sig,
+                    statements,
+                };
+
+                assert!(functions.insert(name2, func).is_none());
             }
             Token::Mod => {
                 let Some(Token::Name(name)) = tokens.next() else {
@@ -226,10 +270,30 @@ fn tokens_to_ast(raw_tokens: Vec<Token>) -> AST {
                     panic!()
                 };
 
-                imports.push(name);
+                // TODO
             }
 
             Token::LineComment(_) => {}
+
+            Token::Use => {
+                let Some(Token::Name(_name)) = tokens.next() else {
+                    panic!()
+                };
+
+                let Some(Token::Path) = tokens.next() else {
+                    panic!()
+                };
+
+                let Some(Token::Star) = tokens.next() else {
+                    panic!()
+                };
+
+                let Some(Token::SemiColon) = tokens.next() else {
+                    panic!()
+                };
+
+                // TODO
+            }
 
             _ => unreachable!(),
         }
@@ -238,11 +302,7 @@ fn tokens_to_ast(raw_tokens: Vec<Token>) -> AST {
     AST { imports, functions }
 }
 
-fn parse_fn_args(tokens: &mut std::vec::IntoIter<Token>) -> String {
-    let Some(Token::Name(name)) = tokens.next() else {
-        panic!()
-    };
-
+fn parse_fn_def(tokens: &mut std::vec::IntoIter<Token>) -> FunctionSig {
     let Some(Token::OpenParens) = tokens.next() else {
         panic!()
     };
@@ -257,27 +317,60 @@ fn parse_fn_args(tokens: &mut std::vec::IntoIter<Token>) -> String {
         panic!()
     };
 
-    return name;
+    FunctionSig {
+        args: Vec::new(),
+        ret: EmptyType::Uninit,
+    }
 }
 
 fn parse_statements(
     tokens: &mut std::vec::IntoIter<Token>,
     vars: &mut HashMap<String, EmptyType>,
+    functions: &HashMap<String, FunctionSig>,
 ) -> Vec<Statement> {
     let mut statements = Vec::new();
 
     loop {
         match tokens.next().unwrap() {
-            Token::Name(variable) => {
-                let Token::Equals = tokens.next().unwrap() else {
-                    panic!()
-                };
+            Token::Name(name) => {
+                let token = tokens.next().unwrap();
 
-                let (value, token) = parse_value(tokens, &vars);
+                if let Token::Equals = token {
+                    let (value, token) = parse_value(tokens, &vars);
 
-                let Token::SemiColon = token else { panic!() };
+                    let Token::SemiColon = token else { panic!() };
 
-                statements.push(Statement::Assignment { variable, value })
+                    statements.push(Statement::Assignment {
+                        variable: name,
+                        value,
+                    })
+                } else if let Token::Dot = token {
+                    let Token::OpenParens = tokens.next().unwrap() else {
+                        panic!()
+                    };
+
+                    let Token::Name(fn_name) = tokens.next().unwrap() else {
+                        panic!()
+                    };
+
+                    let mut args = parse_fn_args(tokens);
+
+                    args.insert(
+                        0,
+                        Value {
+                            val_type: vars.get(&name).unwrap().clone(),
+                            val_source: ValueSource::Variable { name },
+                        },
+                    );
+
+                    let Token::SemiColon = tokens.next().unwrap() else {
+                        panic!()
+                    };
+                } else if let Token::OpenParens = token {
+                } else {
+                    dbg!(token);
+                    unreachable!();
+                }
             }
             Token::Let => {
                 let mut token = tokens.next().unwrap();
@@ -328,6 +421,17 @@ fn parse_statements(
                 };
 
                 statements.push(Statement::While {
+                    statements: parse_statements(tokens, vars),
+                    value: value,
+                });
+            }
+
+            Token::If => {
+                let (value, Token::OpenBrace) = parse_value(tokens, &vars) else {
+                    panic!()
+                };
+
+                statements.push(Statement::If {
                     statements: parse_statements(tokens, vars),
                     value: value,
                 });
@@ -464,7 +568,9 @@ fn parse_value(
             )
         }
 
-        x @ (Token::OpenBrace | Token::SemiColon | Token::CloseParens) => return (value, x),
+        x @ (Token::OpenBrace | Token::SemiColon | Token::CloseParens | Token::Comma) => {
+            return (value, x);
+        }
 
         x => {
             dbg!(x);
@@ -473,9 +579,13 @@ fn parse_value(
     }
 }
 
+fn parse_fn_args(tokens: &mut std::vec::IntoIter<Token>) -> Vec<Value> {
+    todo!()
+}
+
 // TODO this does not handle recursion or indirect recursion
 fn ast_to_bfasm(ast: AST) -> Vec<bfasm::Instruction> {
-    assert_eq!(&ast.imports, &[String::from("libf")]);
+    // assert_eq!(&ast.imports, &[String::from("libf")]);
 
     // let mut functions: HashMap<&str, bfasm::Function> = HashMap::new();
 
@@ -553,6 +663,7 @@ fn ast_statements_to_bfasm(
                         ));
                     }
                     bfasm::PrimativeType::Uninit => unreachable!(),
+                    bfasm::PrimativeType::List(_) => todo!(),
                 }
             }
             Statement::While { statements, value } => {
@@ -574,6 +685,39 @@ fn ast_statements_to_bfasm(
                 instructions.push(bfasm::Instruction::new(
                     offset,
                     bfasm::InstructionVariant::While(while_instructs),
+                ));
+
+                instructions.push(bfasm::Instruction::new(
+                    offset,
+                    bfasm::InstructionVariant::BoolRemove,
+                ));
+            }
+
+            Statement::If { statements, value } => {
+                instructions.append(&mut ast_value_to_bfasm(&value, &vars, offset));
+
+                let mut while_instructs = Vec::new();
+
+                while_instructs.push(bfasm::Instruction::new(
+                    offset,
+                    bfasm::InstructionVariant::BoolRemove,
+                ));
+
+                while_instructs.append(&mut ast_statements_to_bfasm(statements, vars, offset));
+
+                while_instructs.push(bfasm::Instruction::new(
+                    offset,
+                    bfasm::InstructionVariant::BoolSet(false),
+                ));
+
+                instructions.push(bfasm::Instruction::new(
+                    offset,
+                    bfasm::InstructionVariant::While(while_instructs),
+                ));
+
+                instructions.push(bfasm::Instruction::new(
+                    offset,
+                    bfasm::InstructionVariant::BoolRemove,
                 ));
             }
         }
@@ -636,6 +780,7 @@ fn ast_value_to_bfasm(
                     ]
                 }
                 bfasm::PrimativeType::Uninit => unreachable!(),
+                bfasm::PrimativeType::List(_) => todo!(),
             }
         }
         // Value::FunctionCall { name } => todo!(),
@@ -689,7 +834,6 @@ fn ast_value_to_bfasm(
 
 fn main() {
     // bfasm::main();
-
     // todo!();
 
     let program = std::fs::read_to_string("./program/src/main.rs").unwrap();
