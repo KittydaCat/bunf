@@ -61,7 +61,7 @@ trait DataVec<D: CompilerData>: std::fmt::Debug + Clone + PartialEq + Default {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct EmptyVec(Empty);
+pub struct EmptyVec(pub Empty);
 
 impl DataVec<Empty> for EmptyVec {
     fn push(&mut self, data: Empty) {}
@@ -167,6 +167,20 @@ impl PrimativeType<u8, BFVec> {
             PrimativeType::Uninit | PrimativeType::Int(_) | PrimativeType::Bool(_) => 1,
             PrimativeType::List(x) => x.inner.len() * 2 + 3,
         }
+    }
+}
+
+impl PrimativeType<Empty, EmptyVec> {
+    pub fn new_list() -> Self {
+        PrimativeType::List(EmptyVec(Empty))
+    }
+
+    pub fn new_int() -> Self {
+        PrimativeType::Int(Empty)
+    }
+
+    pub fn new_bool() -> Self {
+        PrimativeType::Bool(Empty)
     }
 }
 
