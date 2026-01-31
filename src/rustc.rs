@@ -322,7 +322,7 @@ fn parse_statements(
     tokens: &mut std::iter::Peekable<std::vec::IntoIter<Token>>,
     reqs: &mut HashSet<String>,
 ) -> Vec<Statement> {
-    dbg!(&tokens);
+    // dbg!(&tokens);
 
     let mut top_level_statements = Vec::new();
 
@@ -423,7 +423,7 @@ fn parse_statements(
 
                 let (value, token) = parse_value(tokens, reqs);
 
-                dbg!(&tokens, &variable, &token, &value);
+                // dbg!(&tokens, &variable, &token, &value);
                 let Token::SemiColon = token else { panic!() };
 
                 top_level_statements.push(Statement::Declaration {
@@ -888,7 +888,7 @@ fn type_value(
             }
         }
         ValueSource::FunctionCall { name, args } => {
-            dbg!(&name);
+            // dbg!(&name);
             let sig = sigs.get(&name).unwrap();
 
             let typed_args: Vec<_> = args
@@ -995,7 +995,6 @@ fn ast_to_bfasm(ast: TypedAST) -> Vec<crate::bfasm::Instruction> {
 
     // TODO compiler mains dependences before compiling it and so on
     // or this dependency initalization could be done by ast_fn_to_bfasm
-    //
 
     assert_eq!(
         main_fn.sig,
@@ -1005,12 +1004,7 @@ fn ast_to_bfasm(ast: TypedAST) -> Vec<crate::bfasm::Instruction> {
         }
     );
 
-    block_to_bfasm(
-        main_fn.block,
-        &mut HashMap::new(),
-        // &mut functions,
-        0,
-    )
+    block_to_bfasm(main_fn.block, &mut HashMap::new(), 0)
 }
 
 // TODO list is not given space to do listy things either
@@ -1023,7 +1017,6 @@ fn ast_to_bfasm(ast: TypedAST) -> Vec<crate::bfasm::Instruction> {
 fn block_to_bfasm(
     block: Block,
     vars: &mut HashMap<String, (EmptyType, usize)>,
-    // functions: &mut HashMap<&str, bfasm::Function>,
     mut offset: usize,
 ) -> Vec<crate::bfasm::Instruction> {
     use crate::bfasm::{Instruction, InstructionVariant, PrimativeType};
@@ -1064,7 +1057,7 @@ fn block_to_bfasm(
                 );
 
                 instructions.push(Instruction::new(offset + 2, InstructionVariant::ListNew));
-                offset += 3;
+                offset += 5; // _ _ list _ _
             }
             TypedStatement::Declaration {
                 variable,
@@ -1078,72 +1071,7 @@ fn block_to_bfasm(
             }
 
             /*
-            TypedStatement::Declaration { variable, value } => {
-                instructions.append(&mut value_to_bfasm(&value, &vars, offset));
-
-                assert!(vars.insert(variable, (value.val_type, offset)).is_none());
-
-                // TODO offset should be directly related to vars
-                // insert a check? generate the offset dynamically
-                //
-                let var = block.variables.get(&variable).unwrap();
-
-                /* offset += match var {
-                    TypedVariable {
-                        vartype: EmptyType::Bool(_) | EmptyType::Int(_),
-                        mutable: _,
-                        copied: _,
-                    } => {
-
-                        3
-
-                    }
-                    TypedVariable {
-                        vartype: EmptyType::List(_),
-                        mutable: _,
-                        copied: _,
-                    } => {}
-                    TypedVariable {
-                        vartype: EmptyType::Uninit,
-                        mutable: _,
-                        copied: _,
-                    } => {}
-                } */
-
-                /*
-                offset += match var {
-                    TypedVariable {
-                        vartype: EmptyType::Bool(_) | EmptyType::Int(_),
-                        mutable: _,
-                        copied: CopyState::UsedOnce | CopyState::UsedMulti,
-                    } => 0,
-                    TypedVariable {
-                        vartype: EmptyType::Bool(_) | EmptyType::Int(_),
-                        mutable: _,
-                        copied: CopyState::Unused,
-                    } => 0,
-
-                    TypedVariable {
-                        vartype: EmptyType::List(_),
-                        mutable: _,
-                        copied: CopyState::UsedOnce | CopyState::UsedMulti,
-                    } => 0,
-                    TypedVariable {
-                        vartype: EmptyType::List(_),
-                        mutable: _,
-                        copied: CopyState::Unused,
-                    } => 0,
-
-                    TypedVariable {
-                        vartype: EmptyType::Uninit,
-                        mutable: _,
-                        copied: _,
-                    } => unreachable!(),
-                }
-                */
-
                 // offset += 1;
-
                 // if copied {
                 //     offset += 2;
                 // }
@@ -1256,51 +1184,71 @@ fn value_to_bfasm(
                 PrimativeType::List(_) => todo!(),
             }
         }
-        TypedValueSource::FunctionCall { name, args } => match name.as_str() {
-            "list" => {
-                todo!();
-                assert!(args.is_empty()); // this could probs be removed as it might have been
-                // checked earlier
+        TypedValueSource::FunctionCall { name, args } => {
+            match name.as_str() {
+                "list" => {
+                    todo!();
+                    assert!(args.is_empty()); // this could probs be removed as it might have been
+                    // checked earlier
 
-                // this might mess up offset?
-                vec![Instruction::new(offset, InstructionVariant::ListNew)]
+                    // this might mess up offset?
+                    vec![Instruction::new(offset, InstructionVariant::ListNew)]
+                }
+                "push" => {
+                    // this does not handle list().push(x); as the val source is not a variable
+                    let [
+                        TypedValue {
+                            val_type: EmptyType::List(_),
+                            val_source: TypedValueSource::Variable { name },
+                        },
+                        int_value @ TypedValue {
+                            val_type: EmptyType::Int(_),
+                            val_source: _,
+                        },
+                    ] = &args[..]
+                    else {
+                        panic!();
+                    };
+
+                    let Some((EmptyType::List(_), list_pos)) = vars.get(name) else {
+                        panic!()
+                    };
+
+                    let mut instructs = Vec::new();
+
+                    instructs.append(&mut value_to_bfasm(&int_value, vars, offset));
+
+                    // this should be safe bc lists should have 2 empty cells on either side
+                    instructs.push(Instruction::new(
+                        offset,
+                        InstructionVariant::IntMove(*list_pos + 1),
+                    ));
+
+                    // make space for growth
+                    let mut to_move = vars
+                        .iter()
+                        .map(|x| x.1)
+                        .filter(|x| x.1 > *list_pos)
+                        .collect::<Vec<_>>();
+
+                    // TODO we should sort into reverse instead of reversing the iter
+                    to_move.sort_by_key(|x| x.1);
+                    to_move.iter().rev().for_each(|x| match x.0 {
+                        PrimativeType::Uninit => unimplemented!(),
+                        PrimativeType::Int(_) => instructs
+                            .push(Instruction::new(x.1, InstructionVariant::IntMove(x.1 + 2))),
+                        PrimativeType::Bool(_) => instructs
+                            .push(Instruction::new(x.1, InstructionVariant::BoolMove(x.1 + 2))),
+                        PrimativeType::List(_) => todo!(),
+                    });
+
+                    instructs.push(Instruction::new(*list_pos, InstructionVariant::ListPush));
+
+                    instructs
+                }
+                _ => todo!("{name},"),
             }
-            "push" => {
-                // this does not handle list().push(x); as the val source is not a variable
-                let [
-                    TypedValue {
-                        val_type: EmptyType::List(_),
-                        val_source: TypedValueSource::Variable { name },
-                    },
-                    int_value @ TypedValue {
-                        val_type: EmptyType::Int(_),
-                        val_source: _,
-                    },
-                ] = &args[..]
-                else {
-                    panic!();
-                };
-
-                let Some((EmptyType::List(_), list_pos)) = vars.get(name) else {
-                    panic!()
-                };
-
-                let mut instructs = Vec::new();
-
-                instructs.append(&mut value_to_bfasm(&int_value, vars, offset));
-                instructs.push(Instruction::new(
-                    offset,
-                    InstructionVariant::IntMove(*list_pos - 1),
-                ));
-                instructs.push(Instruction::new(
-                    *list_pos - 2,
-                    InstructionVariant::ListPush,
-                ));
-
-                instructs
-            }
-            _ => todo!("{name},"),
-        },
+        }
         TypedValueSource::Operation(op) => {
             let mut instructs = Vec::new();
             match op {
@@ -1338,9 +1286,6 @@ fn value_to_bfasm(
 }
 
 pub fn main() {
-    // bfasm::main();
-    // todo!();
-
     let program = std::fs::read_to_string("./program/src/main.rs").unwrap();
 
     let tokens = tokenize(&program);
@@ -1359,9 +1304,10 @@ pub fn main() {
 
     dbg!(&instructs);
 
-    // let mut compiler = DebugComplier::default();
-    // compiler.exec_instructs(&instructs);
-    // dbg!(compiler);
+    let mut compiler = DebugComplier::default();
+    compiler.exec_instructs(&instructs);
+
+    dbg!(compiler.to_str());
 }
 
 #[cfg(test)]

@@ -64,13 +64,13 @@ trait DataVec<D: CompilerData>: std::fmt::Debug + Clone + PartialEq + Default {
 pub struct EmptyVec(pub Empty);
 
 impl DataVec<Empty> for EmptyVec {
-    fn push(&mut self, data: Empty) {}
+    fn push(&mut self, _: Empty) {}
 
     fn pop(&mut self) -> Empty {
         Empty
     }
 
-    fn get_mut(&mut self, index: Empty) -> &mut Empty {
+    fn get_mut(&mut self, _: Empty) -> &mut Empty {
         &mut self.0
     }
 
@@ -122,12 +122,11 @@ impl<D: CompilerData, V: DataVec<D>> PrimativeType<D, V> {
     }
 
     fn traverse_array(array: &[Self]) -> (String, String) {
-        dbg!(array);
         let ltr = array.iter().map(|x| x.traverse().0).collect();
 
         let rtl = array.iter().rev().map(|x| x.traverse().1).collect();
 
-        dbg!((ltr, rtl))
+        (ltr, rtl)
     }
 
     fn to_empty(&self) -> PrimativeType<Empty, EmptyVec> {
@@ -329,7 +328,7 @@ enum CompilerError {
     TypeMismatch,
 }
 
-trait Compiler<D: CompilerData, V: DataVec<D>> {
+trait Compiler<D: CompilerData, V: DataVec<D>>: std::fmt::Debug {
     // array methods
     fn get_array_mut(&mut self) -> &mut Vec<PrimativeType<D, V>>;
 
@@ -372,7 +371,7 @@ trait Compiler<D: CompilerData, V: DataVec<D>> {
         // dbg!(&code);
 
         if !*self.write_enabled() {
-            dbg!("the thing");
+            // dbg!("the thing");
             return;
         }
 
@@ -398,7 +397,13 @@ trait Compiler<D: CompilerData, V: DataVec<D>> {
     fn exec(&mut self, x: &Instruction) -> Result<(), CompilerError>;
 
     fn exec_instructs(&mut self, instructs: &[Instruction]) {
-        instructs.iter().for_each(|x| self.exec(x).unwrap())
+        instructs.iter().for_each(|x| match self.exec(x) {
+            Ok(()) => {}
+            Err(CompilerError::TypeMismatch) => {
+                dbg!(x, &self);
+                panic!()
+            }
+        })
     }
 }
 
@@ -433,26 +438,24 @@ impl DebugComplier {
     }
 
     fn compare_states(&mut self) -> bool {
-        dbg!("comparing states");
-        dbg!(&self);
-
         if self.input != self.interp.input {
-            dbg!("1");
+            // dbg!("1");
             return false;
         }
 
         if self.output != self.interp.output {
-            dbg!("2");
+            // dbg!("2");
             return false;
         }
 
-        let array_pt_pos: usize = dbg!(self.get_mut(0, self.index + 1))
+        let array_pt_pos: usize = self
+            .get_mut(0, self.index + 1)
             .iter()
             .map(|x| x.bf_len())
             .sum();
 
-        if dbg!(array_pt_pos - 1) != self.interp.index {
-            dbg!("3");
+        if array_pt_pos - 1 != self.interp.index {
+            // dbg!("3");
             return false;
         }
 
@@ -463,15 +466,21 @@ impl DebugComplier {
         let mut bf_index = 0;
 
         while let Some(x) = iter.next() {
-            dbg!(x, bf_index);
-            let y = dbg!(x.to_bf());
+            // dbg!(x, bf_index);
+            let y = x.to_bf();
 
             while bf_index + y.len() > self.interp.array.len() {
                 self.interp.array.push(0);
             }
 
-            if dbg!(self.interp.array.get(bf_index..(bf_index + y.len()))).unwrap() != y {
-                dbg!("4");
+            if self
+                .interp
+                .array
+                .get(bf_index..(bf_index + y.len()))
+                .unwrap()
+                != y
+            {
+                // dbg!("4");
                 return false;
             }
 
@@ -480,12 +489,16 @@ impl DebugComplier {
 
         if let Some(array) = self.interp.array.get(bf_index..) {
             if array.iter().any(|x| *x != 0) {
-                dbg!("5");
+                // dbg!("5");
                 return false;
             }
         }
 
         true
+    }
+
+    pub fn to_str(&self) -> String {
+        bf::BFInstruction::to_str(&self.interp.instructs)
     }
 }
 
@@ -540,10 +553,8 @@ impl Compiler<u8, BFVec> for DebugComplier {
     }
 
     fn exec(&mut self, x: &Instruction) -> Result<(), CompilerError> {
-        dbg!(x);
         x.raw_exec(self)?;
 
-        dbg!(x);
         let label = self.interp.exec_until_label().unwrap();
 
         assert_eq!(x.name(), label);
@@ -554,17 +565,18 @@ impl Compiler<u8, BFVec> for DebugComplier {
     }
 }
 
-pub struct BasicCompiler {
+#[derive(Debug)]
+pub struct EmptyCompiler {
     array: Vec<PrimativeType<Empty, EmptyVec>>,
     index: usize,
     instructs: Vec<bf::BFInstruction>,
     write_enabled: bool,
 }
 
-impl BasicCompiler {
+impl EmptyCompiler {
     fn new<D: CompilerData, V: DataVec<D>>(types: &[PrimativeType<D, V>], index: usize) -> Self {
         let array = types.iter().map(|x| x.to_empty()).collect();
-        BasicCompiler {
+        EmptyCompiler {
             array,
             index,
             ..Default::default()
@@ -572,9 +584,9 @@ impl BasicCompiler {
     }
 }
 
-impl Default for BasicCompiler {
+impl Default for EmptyCompiler {
     fn default() -> Self {
-        BasicCompiler {
+        EmptyCompiler {
             array: Default::default(),
             index: Default::default(),
             instructs: Default::default(),
@@ -583,7 +595,7 @@ impl Default for BasicCompiler {
     }
 }
 
-impl Compiler<Empty, EmptyVec> for BasicCompiler {
+impl Compiler<Empty, EmptyVec> for EmptyCompiler {
     fn get_array_mut(&mut self) -> &mut Vec<PrimativeType<Empty, EmptyVec>> {
         &mut self.array
     }
@@ -970,7 +982,6 @@ fn int_move<C: Compiler<D, V>, D: CompilerData, V: DataVec<D>>(
     let mut index_slice = compiler.get_mut_chunk(index);
 
     let [y @ PrimativeType::Uninit] = &mut index_slice else {
-        // dbg!();
         return Err(CompilerError::TypeMismatch);
     };
 
@@ -1026,7 +1037,6 @@ fn bool_move<C: Compiler<D, V>, D: CompilerData, V: DataVec<D>>(
     let mut index_slice = compiler.get_mut_chunk(index);
 
     let [y @ PrimativeType::Uninit] = &mut index_slice else {
-        // dbg!();
         return Err(CompilerError::TypeMismatch);
     };
 
@@ -1131,7 +1141,7 @@ fn bfasm_function<C: Compiler<D, V>, D: CompilerData, V: DataVec<D>>(
     // run the instructs on the test compiler
     let len = compiler.get_array_mut().len() - target;
 
-    let mut test_compiler = BasicCompiler::new(compiler.get_mut(target, len), 0);
+    let mut test_compiler = EmptyCompiler::new(compiler.get_mut(target, len), 0);
 
     test_compiler.exec_instructs(instructs);
 
@@ -1256,8 +1266,8 @@ fn type_check<D: CompilerData, V: DataVec<D>>(
     target: usize,
     instructs: &[Instruction],
 ) -> Result<Vec<bf::BFInstruction>, CompilerError> {
-    dbg!("type checking", instructs);
-    let mut compiler = BasicCompiler::new(array, target);
+    // dbg!("type checking", instructs);
+    let mut compiler = EmptyCompiler::new(array, target);
 
     compiler.exec_instructs(instructs);
     move_ptr_to(&mut compiler, target);
