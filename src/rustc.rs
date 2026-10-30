@@ -139,6 +139,18 @@ fn tokenize(program_txt: &str) -> Vec<Token> {
             '!' => tokens.push(Token::Not),
             '.' => tokens.push(Token::Dot),
 
+            '\'' => {
+                tokens.push(Token::Literal(Literal::Int(
+                    program.next().unwrap() as u32 as u8
+                )));
+                let str = "' as usize";
+                let str_iter = str.chars();
+
+                for x in str_iter {
+                    assert_eq!(x, program.next().unwrap());
+                }
+            }
+
             _ => {
                 dbg!(car);
                 todo!()
@@ -375,9 +387,21 @@ fn parse_statements(
                         };
                     }
                     Token::OpenParens => {
-                        todo!("add non ret func calls");
                         reqs.insert(name.clone());
+
+                        let args = parse_fn_args(tokens, reqs);
+
+                        top_level_statements.push(Statement::Unit {
+                            value: Value {
+                                val_source: ValueSource::FunctionCall { name, args },
+                            },
+                        });
+
+                        let Token::SemiColon = tokens.next().unwrap() else {
+                            panic!()
+                        };
                     }
+
                     Token::Plus => {
                         assert_eq!(Token::Equals, tokens.next().unwrap());
 
@@ -397,6 +421,31 @@ fn parse_statements(
                             },
                         });
                     }
+
+                    Token::Minus => {
+                        assert_eq!(Token::Equals, tokens.next().unwrap());
+
+                        let Token::Literal(Literal::Int(x)) = tokens.next().unwrap() else {
+                            panic!()
+                        };
+
+                        let Token::SemiColon = tokens.next().unwrap() else {
+                            panic!()
+                        };
+
+                        top_level_statements.push(Statement::Assignment {
+                            variable: name.clone(),
+                            value: Value {
+                                val_source: ValueSource::Operation(Operation::IntSub(
+                                    Box::new(Value {
+                                        val_source: ValueSource::Variable { name },
+                                    }),
+                                    x,
+                                )),
+                            },
+                        });
+                    }
+
                     token => {
                         dbg!(token);
                         unreachable!();
@@ -423,7 +472,6 @@ fn parse_statements(
 
                 let (value, token) = parse_value(tokens, reqs);
 
-                // dbg!(&tokens, &variable, &token, &value);
                 let Token::SemiColon = token else { panic!() };
 
                 top_level_statements.push(Statement::Declaration {
@@ -463,7 +511,7 @@ fn parse_statements(
                 });
             }
 
-            _ => unreachable!(),
+            x => unreachable!("{x:?}"),
         }
     }
 }
@@ -474,7 +522,7 @@ fn parse_value(
 ) -> (Value, Token) {
     // let mut expressions = Vec::new();
 
-    let value = match tokens.next().unwrap() {
+    let mut value = match tokens.next().unwrap() {
         // either a function or variable
         Token::Name(name) => Value {
             val_source: ValueSource::Variable { name },
@@ -519,97 +567,151 @@ fn parse_value(
         }
     };
 
-    let token = tokens.next().unwrap();
+    let mut token = tokens.next().unwrap();
 
     // if let Token::SemiColon = token {
     //     return (value, Token::SemiColon);
     // };
 
-    match token {
-        Token::Plus => {
-            let (value2, token) = parse_value(tokens, reqs);
+    loop {
+        (value, token) = match token {
+            Token::Plus => {
+                let (value2, token) = parse_value(tokens, reqs);
 
-            (
-                Value {
-                    // TODO fix this to not assume plus acts on ints
-                    val_source: ValueSource::Operation(Operation::IntAdd(
-                        Box::new(value),
-                        Box::new(value2),
-                    )),
-                },
-                token,
-            )
-        }
+                (
+                    Value {
+                        // TODO fix this to not assume plus acts on ints
+                        val_source: ValueSource::Operation(Operation::IntAdd(
+                            Box::new(value),
+                            Box::new(value2),
+                        )),
+                    },
+                    token,
+                )
+            }
 
-        Token::Equals => {
-            let Token::Equals = tokens.next().unwrap() else {
-                panic!()
-            };
+            Token::Equals => {
+                let Token::Equals = tokens.next().unwrap() else {
+                    panic!()
+                };
 
-            let (value2, token) = parse_value(tokens, reqs);
+                let (value2, token) = parse_value(tokens, reqs);
 
-            (
-                Value {
-                    val_source: ValueSource::Operation(Operation::IntEq(
-                        Box::new(value),
-                        Box::new(value2),
-                    )),
-                },
-                token,
-            )
-        }
+                (
+                    Value {
+                        val_source: ValueSource::Operation(Operation::IntEq(
+                            Box::new(value),
+                            Box::new(value2),
+                        )),
+                    },
+                    token,
+                )
+            }
 
-        Token::Minus => {
-            let (
-                Value {
-                    val_source: ValueSource::Constant(Literal::Int(x)),
-                },
-                token,
-            ) = parse_value(tokens, reqs)
-            else {
-                panic!()
-            };
+            Token::Not => {
+                assert_eq!(Token::Equals, tokens.next().unwrap());
 
-            (
-                Value {
-                    val_source: ValueSource::Operation(Operation::IntSub(Box::new(value), x)),
-                },
-                token,
-            )
-        }
+                let (value2, token) = parse_value(tokens, reqs);
 
-        Token::Dot => {
-            todo!()
-        }
+                (
+                    Value {
+                        val_source: ValueSource::Operation(Operation::BoolNot(Box::new(Value {
+                            val_source: ValueSource::Operation(Operation::IntEq(
+                                Box::new(value),
+                                Box::new(value2),
+                            )),
+                        }))),
+                    },
+                    token,
+                )
+            }
 
-        Token::OpenParens => {
-            let Value {
-                val_source: ValueSource::Variable { name },
-            } = value
-            else {
-                panic!()
-            };
+            Token::Minus => {
+                let (
+                    Value {
+                        val_source: ValueSource::Constant(Literal::Int(x)),
+                    },
+                    token,
+                ) = parse_value(tokens, reqs)
+                else {
+                    panic!()
+                };
 
-            let args = parse_fn_args(tokens, reqs);
+                (
+                    Value {
+                        val_source: ValueSource::Operation(Operation::IntSub(Box::new(value), x)),
+                    },
+                    token,
+                )
+            }
 
-            reqs.insert(name.clone());
+            Token::Dot => {
+                let Value {
+                    val_source: ValueSource::Variable { name },
+                } = value
+                else {
+                    panic!()
+                };
 
-            (
-                Value {
-                    val_source: ValueSource::FunctionCall { name, args },
-                },
-                tokens.next().unwrap(),
-            )
-        }
+                let Token::Name(fn_name) = tokens.next().unwrap() else {
+                    panic!()
+                };
 
-        x @ (Token::OpenBrace | Token::SemiColon | Token::CloseParens | Token::Comma) => {
-            return (value, x);
-        }
+                reqs.insert(fn_name.clone());
 
-        x => {
-            dbg!(x);
-            dbg!(tokens);
-            todo!()
+                let Token::OpenParens = tokens.next().unwrap() else {
+                    panic!()
+                };
+
+                let mut args = parse_fn_args(tokens, reqs);
+
+                args.insert(
+                    0,
+                    Value {
+                        val_source: ValueSource::Variable { name: name.clone() },
+                    },
+                );
+
+                (
+                    Value {
+                        val_source: ValueSource::FunctionCall {
+                            name: fn_name,
+                            args,
+                        },
+                    },
+                    tokens.next().unwrap(),
+                )
+            }
+
+            Token::OpenParens => {
+                let Value {
+                    val_source: ValueSource::Variable { name },
+                } = value
+                else {
+                    panic!()
+                };
+
+                let args = parse_fn_args(tokens, reqs);
+
+                reqs.insert(name.clone());
+
+                (
+                    Value {
+                        val_source: ValueSource::FunctionCall { name, args },
+                    },
+                    tokens.next().unwrap(),
+                )
+            }
+
+            x @ (Token::OpenBrace | Token::SemiColon | Token::CloseParens | Token::Comma) => {
+                return (value, x);
+            }
+
+            x => {
+                dbg!(x);
+                dbg!(tokens);
+                todo!()
+            }
         }
     }
 }
@@ -633,7 +735,7 @@ fn parse_fn_args(
         if Token::CloseParens == token {
             break;
         } else {
-            assert_eq!(Token::Comma, token);
+            assert_eq!(Token::Comma, token, "{values:?}");
         }
     }
 
@@ -775,6 +877,45 @@ fn libf_func_sigs() -> HashMap<String, FunctionSig> {
                     ret: EmptyType::Uninit,
                 },
             ),
+            // (
+            //     String::from("pop"),
+            //     FunctionSig {
+            //         args: vec![EmptyType::Int(Empty)],
+            //         ret: EmptyType::Uninit,
+            //     },
+            // ),
+            (
+                String::from("index"),
+                FunctionSig {
+                    args: vec![EmptyType::new_list(), EmptyType::Int(Empty)],
+                    ret: EmptyType::Int(Empty),
+                },
+            ),
+            (
+                String::from("index_set"),
+                FunctionSig {
+                    args: vec![
+                        EmptyType::new_list(),
+                        EmptyType::Int(Empty),
+                        EmptyType::Int(Empty),
+                    ],
+                    ret: EmptyType::Uninit,
+                },
+            ),
+            (
+                String::from("input"),
+                FunctionSig {
+                    args: vec![],
+                    ret: EmptyType::Int(Empty),
+                },
+            ),
+            (
+                String::from("output"),
+                FunctionSig {
+                    args: vec![EmptyType::Int(Empty)],
+                    ret: EmptyType::Uninit,
+                },
+            ),
         ]
         .iter()
         .cloned(),
@@ -888,7 +1029,6 @@ fn type_value(
             }
         }
         ValueSource::FunctionCall { name, args } => {
-            // dbg!(&name);
             let sig = sigs.get(&name).unwrap();
 
             let typed_args: Vec<_> = args
@@ -1007,13 +1147,6 @@ fn ast_to_bfasm(ast: TypedAST) -> Vec<crate::bfasm::Instruction> {
     block_to_bfasm(main_fn.block, &mut HashMap::new(), 0)
 }
 
-// TODO list is not given space to do listy things either
-// 1. add preprocessing to the var list so that the list comes last and ensure that other
-//    subroutines do not change that
-// 2. move the values that come after it
-//
-
-// TODO this does not work with vars declared only inside while and if blocks maybe?
 fn block_to_bfasm(
     block: Block,
     vars: &mut HashMap<String, (EmptyType, usize)>,
@@ -1021,11 +1154,7 @@ fn block_to_bfasm(
 ) -> Vec<crate::bfasm::Instruction> {
     use crate::bfasm::{Instruction, InstructionVariant, PrimativeType};
 
-    // let mut reverse_stack: Vec<Value> = Vec::new();
-    // let mut reverse_stack: Vec<bfasm::PrimativeType<bfasm::Empty>> = Vec::new();
-
     let mut instructions = Vec::new();
-    // usize is the pos not the padding
 
     for statement in block.statements {
         match statement {
@@ -1039,10 +1168,41 @@ fn block_to_bfasm(
             } => {
                 instructions.append(&mut value_to_bfasm(&value, &vars, offset));
 
-                assert!(vars.insert(variable, (value.val_type, offset)).is_none());
+                assert!(
+                    vars.insert(variable, (value.val_type, offset))
+                        .is_none()
+                );
 
-                offset += 3; // change to save space later?????
+                // inc offset to indicate this space is filled and add and extra 2 spaces to enable
+                // cheap copying
+                offset += 3;
             }
+
+            // this does not support list copying e.g.
+            // let x = list();
+            // let y = x;
+            TypedStatement::Declaration {
+                variable,
+                value:
+                    TypedValue {
+                        val_type: EmptyType::List(_),
+                        val_source: TypedValueSource::FunctionCall { name, args: _ },
+                    },
+            } => {
+                assert_eq!(name, "list");
+
+                assert!(
+                    vars.insert(
+                        variable,
+                        (EmptyType::List(crate::bfasm::EmptyVec(Empty)), offset + 2)
+                    )
+                    .is_none()
+                );
+
+                instructions.push(Instruction::new(offset + 2, InstructionVariant::ListNew));
+                offset += 5; // _ _ list _ _
+            }
+
             TypedStatement::Declaration {
                 variable,
                 value:
@@ -1050,15 +1210,8 @@ fn block_to_bfasm(
                         val_type: EmptyType::List(_),
                         val_source: _,
                     },
-            } => {
-                assert!(
-                    vars.insert(variable, (value.val_type, offset + 2))
-                        .is_none()
-                );
+            } => unimplemented!(),
 
-                instructions.push(Instruction::new(offset + 2, InstructionVariant::ListNew));
-                offset += 5; // _ _ list _ _
-            }
             TypedStatement::Declaration {
                 variable,
                 value:
@@ -1067,15 +1220,9 @@ fn block_to_bfasm(
                         val_source: _,
                     },
             } => {
-                unimplemented!()
+                unreachable!()
             }
 
-            /*
-                // offset += 1;
-                // if copied {
-                //     offset += 2;
-                // }
-            } */
             TypedStatement::Assignment { variable, value } => {
                 instructions.append(&mut value_to_bfasm(&value, &vars, offset));
 
@@ -1096,6 +1243,7 @@ fn block_to_bfasm(
                     PrimativeType::List(_) => todo!(),
                 }
             }
+
             TypedStatement::While { block, value } => {
                 let mut value_instructs = value_to_bfasm(&value, &vars, offset);
 
@@ -1106,6 +1254,18 @@ fn block_to_bfasm(
                 while_instructs.push(Instruction::new(offset, InstructionVariant::BoolRemove));
 
                 while_instructs.append(&mut block_to_bfasm(block, vars, offset));
+
+                // this code assumes that declarations are added in increasing offsets
+                for (name, (t, pos)) in vars.extract_if(|_, x| x.1 >= offset) {
+                    match t {
+                        PrimativeType::Uninit => unreachable!(),
+                        PrimativeType::Int(_) => while_instructs
+                            .push(Instruction::new(pos, InstructionVariant::IntRemove)),
+                        PrimativeType::Bool(_) => while_instructs
+                            .push(Instruction::new(pos, InstructionVariant::BoolRemove)),
+                        PrimativeType::List(_) => unimplemented!(),
+                    }
+                }
 
                 while_instructs.append(&mut value_instructs);
 
@@ -1125,6 +1285,21 @@ fn block_to_bfasm(
 
                 while_instructs.append(&mut block_to_bfasm(block, vars, offset));
 
+                // this code assumes that declarations are added in increasing offsets
+                for (name, (t, pos)) in vars.extract_if(|_, x| x.1 >= offset) {
+                    match t {
+                        PrimativeType::Uninit => unreachable!(),
+                        PrimativeType::Int(_) => {
+                            while_instructs.push(Instruction::new(pos, InstructionVariant::IntRemove))
+                        }
+                        PrimativeType::Bool(_) => {
+                            while_instructs.push(Instruction::new(pos, InstructionVariant::BoolRemove))
+                        }
+                        PrimativeType::List(_) => unimplemented!(),
+                    }
+                }
+
+
                 while_instructs.push(Instruction::new(offset, InstructionVariant::BoolSet(false)));
 
                 instructions.push(Instruction::new(
@@ -1134,6 +1309,7 @@ fn block_to_bfasm(
 
                 instructions.push(Instruction::new(offset, InstructionVariant::BoolRemove));
             }
+
             TypedStatement::Unit { value } => {
                 instructions.append(&mut value_to_bfasm(&value, vars, offset));
             }
@@ -1186,13 +1362,10 @@ fn value_to_bfasm(
         }
         TypedValueSource::FunctionCall { name, args } => {
             match name.as_str() {
+                // this will never be called because list is never created outside of a call to
+                // list() and a call to list is never used to do anything besides create a list
                 "list" => {
-                    todo!();
-                    assert!(args.is_empty()); // this could probs be removed as it might have been
-                    // checked earlier
-
-                    // this might mess up offset?
-                    vec![Instruction::new(offset, InstructionVariant::ListNew)]
+                    unimplemented!()
                 }
                 "push" => {
                     // this does not handle list().push(x); as the val source is not a variable
@@ -1243,6 +1416,116 @@ fn value_to_bfasm(
                     });
 
                     instructs.push(Instruction::new(*list_pos, InstructionVariant::ListPush));
+
+                    instructs
+                }
+
+                "input" => {
+                    vec![Instruction::new(offset, InstructionVariant::Input)]
+                }
+
+                "output" => {
+                    let [
+                        int_value @ TypedValue {
+                            val_type: EmptyType::Int(_),
+                            val_source: _,
+                        },
+                    ] = &args[..]
+                    else {
+                        panic!();
+                    };
+
+                    let mut instructs = value_to_bfasm(int_value, vars, offset);
+
+                    instructs.push(Instruction::new(offset, InstructionVariant::Output));
+                    instructs.push(Instruction::new(offset, InstructionVariant::IntRemove));
+
+                    instructs
+                }
+
+                "pop" => todo!(),
+
+                "index" => {
+                    let [
+                        TypedValue {
+                            val_type: EmptyType::List(_),
+                            val_source: TypedValueSource::Variable { name },
+                        },
+                        int_value @ TypedValue {
+                            val_type: EmptyType::Int(_),
+                            val_source: _,
+                        },
+                    ] = &args[..]
+                    else {
+                        panic!();
+                    };
+
+                    let Some((EmptyType::List(_), list_pos)) = vars.get(name) else {
+                        panic!()
+                    };
+
+                    let mut instructs = Vec::new();
+
+                    instructs.append(&mut value_to_bfasm(&int_value, vars, offset));
+
+                    // this should be safe bc lists should have 2 empty cells on either side
+                    instructs.push(Instruction::new(
+                        offset,
+                        InstructionVariant::IntMove(*list_pos - 1),
+                    ));
+
+                    instructs.push(Instruction::new(
+                        *list_pos - 2,
+                        InstructionVariant::ListIndex,
+                    ));
+
+                    instructs.push(Instruction::new(
+                        *list_pos - 1,
+                        InstructionVariant::IntMove(offset),
+                    ));
+
+                    instructs
+                }
+                "index_set" => {
+                    let [
+                        TypedValue {
+                            val_type: EmptyType::List(_),
+                            val_source: TypedValueSource::Variable { name },
+                        },
+                        idx_val @ TypedValue {
+                            val_type: EmptyType::Int(_),
+                            val_source: _,
+                        },
+                        int_val @ TypedValue {
+                            val_type: EmptyType::Int(_),
+                            val_source: _,
+                        },
+                    ] = &args[..]
+                    else {
+                        panic!()
+                    };
+
+                    let Some((EmptyType::List(_), list_pos)) = vars.get(name) else {
+                        panic!()
+                    };
+
+                    // [WARN] this assumes that no other function call will use the list in between
+                    let mut instructs = value_to_bfasm(int_val, vars, offset);
+                    instructs.push(Instruction::new(
+                        offset,
+                        InstructionVariant::IntMove(*list_pos - 2),
+                    ));
+
+                    instructs.append(&mut value_to_bfasm(idx_val, vars, offset));
+                    instructs.push(Instruction::new(
+                        offset,
+                        InstructionVariant::IntMove(*list_pos - 1),
+                    ));
+
+                    instructs.push(Instruction::new(
+                        *list_pos - 2,
+                        InstructionVariant::ListIndexSet,
+                    ));
 
                     instructs
                 }
@@ -1302,12 +1585,21 @@ pub fn main() {
 
     let instructs = ast_to_bfasm(typed_ast);
 
-    dbg!(&instructs);
+    // dbg!(&instructs);
 
     let mut compiler = DebugComplier::default();
+
+    compiler.push_input_str(",[->+<]>.\0a");
+    // compiler.push_input_str("+++[->+<]\0");
+
     compiler.exec_instructs(&instructs);
 
     dbg!(compiler.to_str());
+
+    let output = compiler.get_output().iter().fold(String::new(), |mut s, x|{ s.push(*x as char); s});
+
+    dbg!(output);
+
 }
 
 #[cfg(test)]

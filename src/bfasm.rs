@@ -1,7 +1,7 @@
 use crate::bf;
 
 // add subtract assign
-trait CompilerData:
+pub trait CompilerData:
     std::fmt::Debug
     + Copy
     + std::ops::Add<Output = Self>
@@ -53,11 +53,10 @@ impl CompilerData for u8 {
     }
 }
 
-trait DataVec<D: CompilerData>: std::fmt::Debug + Clone + PartialEq + Default {
+pub trait DataVec<D: CompilerData>: std::fmt::Debug + Clone + PartialEq + Default {
     fn push(&mut self, data: D);
     fn pop(&mut self) -> D;
     fn get_mut(&mut self, index: D) -> &mut D;
-    // fn len(&self) -> D;
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -73,10 +72,6 @@ impl DataVec<Empty> for EmptyVec {
     fn get_mut(&mut self, _: Empty) -> &mut Empty {
         &mut self.0
     }
-
-    // fn len(&self) -> Empty {
-    //     Empty
-    // }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -96,10 +91,6 @@ impl DataVec<u8> for BFVec {
     fn get_mut(&mut self, index: u8) -> &mut u8 {
         self.inner.get_mut(index as usize).unwrap()
     }
-
-    //fn len(&self) -> u8 {
-    //    self.inner.len() as u8
-    //}
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -121,13 +112,13 @@ impl<D: CompilerData, V: DataVec<D>> PrimativeType<D, V> {
         }
     }
 
-    fn traverse_array(array: &[Self]) -> (String, String) {
-        let ltr = array.iter().map(|x| x.traverse().0).collect();
-
-        let rtl = array.iter().rev().map(|x| x.traverse().1).collect();
-
-        (ltr, rtl)
-    }
+    // fn traverse_array(array: &[Self]) -> (String, String) {
+    //     let ltr = array.iter().map(|x| x.traverse().0).collect();
+    //
+    //     let rtl = array.iter().rev().map(|x| x.traverse().1).collect();
+    //
+    //     dbg!((ltr, rtl), array).0
+    // }
 
     fn to_empty(&self) -> PrimativeType<Empty, EmptyVec> {
         match self {
@@ -140,7 +131,6 @@ impl<D: CompilerData, V: DataVec<D>> PrimativeType<D, V> {
 }
 
 impl PrimativeType<u8, BFVec> {
-    // this is a butt done of heap allocs might be slow as fuck
     fn to_bf(&self) -> Vec<u8> {
         match self {
             PrimativeType::Int(x) => vec![*x],
@@ -219,7 +209,6 @@ pub enum InstructionVariant {
     IntCopy,
     IntRemove,
     IntMove(usize),
-    // IntSubCons(usize),
     // Cmp(usize), // how do we want this to work?
     IntEq,
 
@@ -229,7 +218,6 @@ pub enum InstructionVariant {
     BoolCopy,
     BoolRemove,
     BoolMove(usize),
-    // If(usize, Vec<Instructions>),
     While(Vec<Instruction>),
     // Match(usize, Vec<(u8, Vec<Instructions>)>),
     Function(Function),
@@ -282,7 +270,7 @@ impl Instruction {
 
             InstructionVariant::ListNew => list_new(compiler, target),
             InstructionVariant::ListIndex => list_index(compiler, target),
-            InstructionVariant::ListIndexSet => todo!(),
+            InstructionVariant::ListIndexSet => list_index_set(compiler, target),
             InstructionVariant::ListPush => list_push(compiler, target),
             InstructionVariant::ListPop => list_pop(compiler, target),
 
@@ -314,7 +302,7 @@ impl Instruction {
 
             InstructionVariant::ListNew => "list_new",
             InstructionVariant::ListIndex => "list_index",
-            InstructionVariant::ListIndexSet => todo!(),
+            InstructionVariant::ListIndexSet => "list_index_set",
             InstructionVariant::ListPush => "list_push",
             InstructionVariant::ListPop => "list_pop",
 
@@ -400,7 +388,7 @@ trait Compiler<D: CompilerData, V: DataVec<D>>: std::fmt::Debug {
         instructs.iter().for_each(|x| match self.exec(x) {
             Ok(()) => {}
             Err(CompilerError::TypeMismatch) => {
-                dbg!(x, &self);
+                dbg!(self.get_array_mut(), x);
                 panic!()
             }
         })
@@ -419,15 +407,6 @@ pub struct DebugComplier {
 }
 
 impl DebugComplier {
-    // fn new<D: CompilerData>(types: &[PrimativeType<D>], index: usize) -> Self {
-    //     let array = types.iter().map(|x| x.to_empty()).collect();
-    //     BasicCompiler {
-    //         array,
-    //         index,
-    //         ..Default::default()
-    //     }
-    // }
-
     pub fn exec_instructs(&mut self, instructs: &[Instruction]) {
         Compiler::exec_instructs(self, instructs)
     }
@@ -437,15 +416,21 @@ impl DebugComplier {
         self.interp.input.push(val);
     }
 
-    fn compare_states(&mut self) -> bool {
-        if self.input != self.interp.input {
-            // dbg!("1");
-            return false;
+    pub fn push_input_str(&mut self, s: &str) {
+        for x in s.chars() {
+            self.push_input(x as u32 as u8);
         }
+    }
+
+    pub fn get_output(&self) -> &[u8] {
+        &self.output
+    }
+
+    fn compare_states(&mut self) {
+        assert_eq!(self.input, self.interp.input);
 
         if self.output != self.interp.output {
-            // dbg!("2");
-            return false;
+            panic!()
         }
 
         let array_pt_pos: usize = self
@@ -455,8 +440,7 @@ impl DebugComplier {
             .sum();
 
         if array_pt_pos - 1 != self.interp.index {
-            // dbg!("3");
-            return false;
+            panic!()
         }
 
         self.trim_back();
@@ -473,28 +457,26 @@ impl DebugComplier {
                 self.interp.array.push(0);
             }
 
-            if self
-                .interp
-                .array
-                .get(bf_index..(bf_index + y.len()))
-                .unwrap()
-                != y
-            {
-                // dbg!("4");
-                return false;
-            }
+            assert_eq!(
+                self.interp
+                    .array
+                    .get(bf_index..(bf_index + y.len()))
+                    .unwrap(),
+                y,
+                "{:?} {:?} {:?}",
+                self.array,
+                self.interp.array,
+                self.to_str()
+            );
 
             bf_index += y.len();
         }
 
         if let Some(array) = self.interp.array.get(bf_index..) {
             if array.iter().any(|x| *x != 0) {
-                // dbg!("5");
-                return false;
+                panic!()
             }
         }
-
-        true
     }
 
     pub fn to_str(&self) -> String {
@@ -526,7 +508,7 @@ impl Compiler<u8, BFVec> for DebugComplier {
 
     // TODO check the if input and output fns are correct
     fn get_input(&mut self) -> u8 {
-        self.input.pop().unwrap()
+        self.input.remove(0)
     }
 
     fn push_output(&mut self, val: u8) {
@@ -559,7 +541,7 @@ impl Compiler<u8, BFVec> for DebugComplier {
 
         assert_eq!(x.name(), label);
 
-        assert!(self.compare_states());
+        self.compare_states();
 
         Ok(())
     }
@@ -631,32 +613,6 @@ impl Compiler<Empty, EmptyVec> for EmptyCompiler {
 fn move_ptr_to<C: Compiler<D, V>, D: CompilerData, V: DataVec<D>>(compiler: &mut C, target: usize) {
     // this function always assumes the bf pointer is on the last cell of the value
     // this is only important on multi cell values like lists and in the future signed ints
-
-    // while *compiler.index() != target {
-    //     if *compiler.index() < target {
-    //         // moving left to right
-    //         let index = *compiler.index();
-    //         let x = compiler.get_mut(index, 1)[0].traverse().0;
-    //         compiler.write(x);
-    //         *compiler.index() += 1;
-    //     } else if *compiler.index() > target {
-    //         //moving right to left
-    //         let index = *compiler.index();
-    //         let x = compiler.get_mut(index - 1, 1)[0].traverse().1;
-    //         compiler.write(x);
-    //         *compiler.index() -= 1;
-    //     } else {
-    //         panic!("???");
-    //     }
-    // }
-    //
-    // let code = if index < target {
-    //     PrimativeType::traverse_array(compiler.get_mut(index, target - index)).0
-    // } else if index > target {
-    //     PrimativeType::traverse_array(compiler.get_mut(target, index - target)).1
-    // } else {
-    //     return;
-    // };
 
     let mut index = *compiler.index();
 
@@ -864,8 +820,6 @@ fn bool_remove<C: Compiler<D, V>, D: CompilerData, V: DataVec<D>>(
     Ok(())
 }
 
-// BoolNot(usize),
-// While(usize, Vec<Instruction>),
 fn input<C: Compiler<D, V>, D: CompilerData, V: DataVec<D>>(
     compiler: &mut C,
     target: usize,
@@ -974,6 +928,7 @@ fn int_move<C: Compiler<D, V>, D: CompilerData, V: DataVec<D>>(
     let mut slice = compiler.get_mut_chunk(target);
 
     let [PrimativeType::Int(x)] = &mut slice else {
+        dbg!();
         return Err(CompilerError::TypeMismatch);
     };
 
@@ -982,6 +937,7 @@ fn int_move<C: Compiler<D, V>, D: CompilerData, V: DataVec<D>>(
     let mut index_slice = compiler.get_mut_chunk(index);
 
     let [y @ PrimativeType::Uninit] = &mut index_slice else {
+        dbg!();
         return Err(CompilerError::TypeMismatch);
     };
 
@@ -990,26 +946,10 @@ fn int_move<C: Compiler<D, V>, D: CompilerData, V: DataVec<D>>(
     *compiler.get_mut_chunk(target) = [PrimativeType::Uninit];
 
     compiler.write("[-");
-    // !!! index is the target pos of the move
-    // !!! target is the current index of the ptr
-    //
-    // naming is hard
-    if index < target {
-        //                  \/ we are here
-        // [index] _ _ _ [target]
-        let (ltr, rtl) = PrimativeType::traverse_array(compiler.get_mut(index, target - index));
-        compiler.write(&rtl);
-        compiler.write("+");
-        compiler.write(&ltr);
-    } else if index > target {
-        // [target] _ _ [index]
-        let (ltr, rtl) = PrimativeType::traverse_array(compiler.get_mut(target, index - target));
-        compiler.write(&ltr);
-        compiler.write("+");
-        compiler.write(&rtl);
-    } else {
-        panic!();
-    };
+
+    move_ptr_to(compiler, index);
+    compiler.write("+");
+    move_ptr_to(compiler, target);
 
     compiler.write("]");
 
@@ -1045,26 +985,10 @@ fn bool_move<C: Compiler<D, V>, D: CompilerData, V: DataVec<D>>(
     *compiler.get_mut_chunk(target) = [PrimativeType::Uninit];
 
     compiler.write("[-");
-    // !!! index is the target pos of the move
-    // !!! target is the current index of the ptr
-    //
-    // naming is hard
-    if index < target {
-        //                  \/ we are here
-        // [index] _ _ _ [target]
-        let (ltr, rtl) = PrimativeType::traverse_array(compiler.get_mut(index, target - index));
-        compiler.write(&rtl);
-        compiler.write("+");
-        compiler.write(&ltr);
-    } else if index > target {
-        // [target] _ _ [index]
-        let (ltr, rtl) = PrimativeType::traverse_array(compiler.get_mut(target, index - target));
-        compiler.write(&ltr);
-        compiler.write("+");
-        compiler.write(&rtl);
-    } else {
-        panic!();
-    };
+
+    move_ptr_to(compiler, index);
+    compiler.write("+");
+    move_ptr_to(compiler, target);
 
     compiler.write("]");
 
@@ -1215,40 +1139,35 @@ fn bool_while<C: Compiler<D, V>, D: CompilerData, V: DataVec<D>>(
     // first slice check
     let mut slice = compiler.get_mut_chunk(target);
 
-    let [PrimativeType::Bool(_) /*| PrimativeType::Int(_)*/] = &mut slice else {
+    let [PrimativeType::Bool(_)] = &mut slice else {
         return Err(CompilerError::TypeMismatch);
     };
 
     // write the instructs without executing
     // this is the only place where exec_enabled is needed
     // TODO we might move this logic to the exec method Instruction
-    // let exec = *compiler.exec_enabled();
-    // *compiler.exec_enabled() = false;
 
     compiler.write("[");
 
     let bf_instructs = type_check(compiler.get_array_mut(), target, instructs).unwrap();
+
     compiler.write_bf(bf_instructs);
-    // we should move the ptr back in the type checking
-    //move_ptr_to(compiler, target);
+
     assert_eq!(*compiler.index(), target);
+
     compiler.write("]");
 
     compiler.label("bool_while");
-    // *compiler.exec_enabled() = exec;
 
     // exec the instructs without writing
     let write_state = *compiler.write_enabled();
 
     *compiler.write_enabled() = false;
 
-    while let [PrimativeType::Bool(val)] = //  | PrimativeType::Int(val) ] =
-        compiler.get_mut_chunk(target)
-    {
+    while let [PrimativeType::Bool(val)] = compiler.get_mut_chunk(target) {
         if !val.to_bool() {
             break;
         }
-        // instructs.iter().for_each(|x| x.exec(compiler).unwrap());
 
         compiler.exec_instructs(instructs);
 
@@ -1333,14 +1252,6 @@ fn list_index<C: Compiler<D, V>, D: CompilerData, V: DataVec<D>>(
 
     *x = *list.get_mut(*x);
 
-    // [->>[>]+[<]<] fill the ones
-    // >>[>]>-[-<<[<]<+>>[>]>] move the value out
-    // <<[<]>-<< clear the first one
-    // [->+>+<<] clone the vals
-    // >>[-<<+>>]<+[->>[>]>+<<[<]<]<"
-
-    // compiler.write("[->>[>]+[<]<]>>[>]>-[-<<[<]<+>>[>]>]<<[<]>-<<[->+>+<<]>>[-<<+>>]<+[->>[>]>+<<[<]<]<");
-
     compiler.write("[->>[>]+[<]<]>>[>]>"); // set the ones
     compiler.write("[-<<[<]<<+>>>[>]>]<<[<]<<"); // move the selected val
     compiler.write("[->+>+<<]>>[-<<+>>]"); // copy the val
@@ -1348,8 +1259,49 @@ fn list_index<C: Compiler<D, V>, D: CompilerData, V: DataVec<D>>(
     compiler.write(">>[->>]<[<<]<<"); // clear the ones
     compiler.write("[->+<]>-"); // move the val
 
-    // compiler.write("");
     compiler.label("list_index");
+
+    Ok(())
+}
+
+fn list_index_set<C: Compiler<D, V>, D: CompilerData, V: DataVec<D>>(
+    compiler: &mut C,
+    target: usize,
+) -> Result<(), CompilerError> {
+    move_ptr_to(compiler, target + 1);
+
+    // first slice check
+    let mut slice = compiler.get_mut_chunk(target);
+
+    let [
+        PrimativeType::Int(x),
+        PrimativeType::Int(idx),
+        PrimativeType::List(list),
+    ] = &mut slice
+    else {
+        return Err(CompilerError::TypeMismatch);
+    };
+
+    *list.get_mut(*idx) = *x;
+
+    let [
+        x @ PrimativeType::Int(_),
+        y @ PrimativeType::Int(_),
+        PrimativeType::List(_),
+    ] = &mut slice
+    else {
+        return Err(CompilerError::TypeMismatch);
+    };
+
+    *x = PrimativeType::Uninit;
+    *y = PrimativeType::Uninit;
+
+    compiler.write("[->>[>]+[<]<]>>[>]>"); // set the ones
+    compiler.write("[-]<<[<]<<"); // clear the val
+    compiler.write("+[->>>[>]>+<<[<]<<]");
+    compiler.write(">>>[->>]<[<<]<"); // clear the ones
+
+    compiler.label("list_index_set");
 
     Ok(())
 }
@@ -1450,19 +1402,6 @@ pub fn test(instructs: &[Instruction], input: &str) -> String {
     bf::BFInstruction::to_str(&test.interp.instructs)
 }
 
-pub fn main() {
-    use Instruction as BFASM;
-    use InstructionVariant as Var;
-    // insert testcase here
-
-    dbg!(test(
-        &[
-            // fill out
-                    ],
-        ""
-    ));
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -1485,25 +1424,26 @@ mod test {
     //
     #[test]
     fn list_index() {
-        assert_eq!(
-            test(
-                &[
-                    Instruction::new(2, Var::ListNew),
-                    Instruction::new(3, Var::IntSet(3)),
-                    Instruction::new(2, Var::ListPush),
-                    Instruction::new(3, Var::IntSet(5)),
-                    Instruction::new(2, Var::ListPush),
-                    Instruction::new(1, Var::IntSet(0)),
-                    Instruction::new(0, Var::ListIndex),
-                    Instruction::new(1, Var::IntRemove),
-                    Instruction::new(1, Var::IntSet(1)),
-                    Instruction::new(0, Var::ListIndex),
-                    Instruction::new(1, Var::IntRemove),
-                ],
-                ""
-            ),
-            ">>>>list_new>+++int_set+[-<+>]>list_push>+++++int_set+[-<+>]>list_push<<[<<]<int_set[->>[>]+[<]<]>>[>]>[-<<[<]<<+>>>[>]>]<<[<]<<[->+>+<<]>>[-<<+>>]<[->>[>]>+<<[<]<]>>[->>]<[<<]<<[->+<]>-list_index[-]int_remove+int_set[->>[>]+[<]<]>>[>]>[-<<[<]<<+>>>[>]>]<<[<]<<[->+>+<<]>>[-<<+>>]<[->>[>]>+<<[<]<]>>[->>]<[<<]<<[->+<]>-list_index[-]int_remove",
+        // assert_eq!(
+        test(
+            &[
+                Instruction::new(2, Var::ListNew),
+                Instruction::new(3, Var::IntSet(3)),
+                Instruction::new(2, Var::ListPush),
+                Instruction::new(3, Var::IntSet(5)),
+                Instruction::new(2, Var::ListPush),
+                Instruction::new(3, Var::IntSet(1)),
+                Instruction::new(3, Var::IntMove(1)),
+                Instruction::new(0, Var::ListIndex),
+                Instruction::new(1, Var::IntRemove),
+                Instruction::new(1, Var::IntSet(1)),
+                Instruction::new(0, Var::ListIndex),
+                Instruction::new(1, Var::IntRemove),
+            ],
+            "",
         );
+        //     ">>>>list_new>+++int_set+[-<+>]>list_push>+++++int_set+[-<+>]>list_push<<[<<]<int_set[->>[>]+[<]<]>>[>]>[-<<[<]<<+>>>[>]>]<<[<]<<[->+>+<<]>>[-<<+>>]<[->>[>]>+<<[<]<]>>[->>]<[<<]<<[->+<]>-list_index[-]int_remove+int_set[->>[>]+[<]<]>>[>]>[-<<[<]<<+>>>[>]>]<<[<]<<[->+>+<<]>>[-<<+>>]<[->>[>]>+<<[<]<]>>[->>]<[<<]<<[->+<]>-list_index[-]int_remove",
+        // );
     }
 
     #[test]
